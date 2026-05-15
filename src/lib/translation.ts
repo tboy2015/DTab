@@ -31,7 +31,7 @@ function readTranslatedText(payload: unknown): string {
     .trim();
 }
 
-async function translateTextToChinese(text: string): Promise<string> {
+export async function translateTextToChinese(text: string): Promise<string> {
   const params = new URLSearchParams({
     client: "gtx",
     sl: "auto",

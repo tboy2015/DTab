@@ -65,8 +65,7 @@ export function createEmptyStorage(now = new Date()): AppStorage {
     },
     userLibrary: {
       favorites: {},
-      ignored: {},
-      keywords: ["Agent", "MCP", "RAG"]
+      ignored: {}
     },
     lastUpdated: {},
     nextRefreshAt: {
@@ -112,8 +111,7 @@ export function mergeStorage(base: AppStorage, patch?: Partial<AppStorage>): App
       ignored: {
         ...base.userLibrary.ignored,
         ...patch.userLibrary?.ignored
-      },
-      keywords: patch.userLibrary?.keywords ?? base.userLibrary.keywords
+      }
     },
     lastUpdated: {
       ...base.lastUpdated,

@@ -15,6 +15,7 @@ export interface RepoItem {
   description: string;
   originalDescription?: string;
   summary?: RepoSummary;
+  readmeSummary?: ReadmeSummary;
   stars: number;
   growth: number;
   language: string;
@@ -29,6 +30,13 @@ export interface RepoSummary {
   signal: string;
 }
 
+export interface ReadmeSummary {
+  overview: string;
+  highlights: string[];
+  quickStart?: string;
+  updatedAt: string;
+}
+
 export interface DigestItem {
   key: DigestKey;
   title: string;
@@ -41,7 +49,6 @@ export interface DigestItem {
 export interface UserLibrary {
   favorites: Record<string, RepoItem>;
   ignored: Record<string, RepoItem>;
-  keywords: string[];
 }
 
 export interface AppStorage {

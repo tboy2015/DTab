@@ -3,27 +3,33 @@ import {
   Bookmark,
   BookmarkCheck,
   CalendarClock,
+  ChevronDown,
+  Code2,
   ExternalLink,
   Flame,
   Github,
   EyeOff,
-  Plus,
+  Library,
+  Newspaper,
   RefreshCw,
-  Radar,
   RotateCcw,
   Search,
+  Sparkles,
   Star,
   X
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { CATEGORY_LABELS } from "./lib/defaults";
-import { findKeywordMatches, normalizeKeywords } from "./lib/personalization";
+import { fetchDomesticHotSources, HOT_CATEGORY_LABELS } from "./lib/hot";
+import type { HotCategory, HotSource } from "./lib/hot";
+import { fetchReadmeSummary } from "./lib/readme";
 import { refreshDashboard } from "./lib/refresh";
 import { readDashboardStorage, writeDashboardStorage } from "./lib/storage";
 import { createRepoSummary } from "./lib/summary";
 import type {
   AppStorage,
+  ReadmeSummary,
   RecommendationCategory,
   RepoItem,
   RuntimeMessage,
@@ -40,10 +46,79 @@ const RANGE_LABELS: Record<TrendRange, string> = {
 
 const CATEGORY_ORDER: RecommendationCategory[] = RECOMMENDATION_CATEGORIES;
 const TRENDING_VISIBLE_LIMIT = 12;
-const RADAR_VISIBLE_LIMIT = 4;
 const RECOMMENDATION_VISIBLE_LIMIT = 5;
-const FAVORITE_VISIBLE_LIMIT = 4;
-const DIGEST_VISIBLE_LIMIT = 3;
+const FEATURED_VISIBLE_LIMIT = 4;
+
+const SEARCH_ENGINES = [
+  {
+    id: "github",
+    label: "GitHub",
+    placeholder: "搜索仓库、Topic 或开发者",
+    buildUrl: (query: string) => `https://github.com/search?q=${encodeURIComponent(query)}&type=repositories`
+  },
+  {
+    id: "google",
+    label: "Google",
+    placeholder: "Google 搜索",
+    buildUrl: (query: string) => `https://www.google.com/search?q=${encodeURIComponent(query)}`
+  },
+  {
+    id: "bing",
+    label: "Bing",
+    placeholder: "Bing 搜索",
+    buildUrl: (query: string) => `https://www.bing.com/search?q=${encodeURIComponent(query)}`
+  },
+  {
+    id: "baidu",
+    label: "百度",
+    placeholder: "百度搜索",
+    buildUrl: (query: string) => `https://www.baidu.com/s?wd=${encodeURIComponent(query)}`
+  }
+] as const;
+
+const WEBSITE_CATEGORIES = [
+  {
+    id: "ai",
+    label: "AI 助手",
+    icon: Sparkles,
+    links: [
+      { name: "ChatGPT", url: "https://chatgpt.com", note: "OpenAI 对话助手", mark: "C" },
+      { name: "Claude", url: "https://claude.ai", note: "Anthropic 对话与写作", mark: "Cl" },
+      { name: "DeepSeek", url: "https://chat.deepseek.com", note: "深度求索对话入口", mark: "D" },
+      { name: "腾讯元宝", url: "https://yuanbao.tencent.com", note: "腾讯 AI 助手", mark: "元" }
+    ]
+  },
+  {
+    id: "coding",
+    label: "编程",
+    icon: Code2,
+    links: [
+      { name: "GitHub", url: "https://github.com", note: "代码托管与开源社区", mark: "G" },
+      { name: "Cursor", url: "https://cursor.com", note: "AI 编程编辑器", mark: "Cu" },
+      { name: "v0", url: "https://v0.dev", note: "生成式 UI 原型", mark: "v0" },
+      { name: "StackBlitz", url: "https://stackblitz.com", note: "浏览器内开发环境", mark: "S" }
+    ]
+  },
+  {
+    id: "resources",
+    label: "开发资源",
+    icon: Library,
+    links: [
+      { name: "MDN", url: "https://developer.mozilla.org", note: "Web 技术文档", mark: "M" },
+      { name: "npm", url: "https://www.npmjs.com", note: "JavaScript 包生态", mark: "n" },
+      { name: "Docker Hub", url: "https://hub.docker.com", note: "容器镜像仓库", mark: "Dk" },
+      { name: "Vercel", url: "https://vercel.com", note: "前端部署平台", mark: "V" }
+    ]
+  }
+] as const;
+
+type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
+type WebsiteCategoryId = (typeof WEBSITE_CATEGORIES)[number]["id"];
+type HotLoadState = "idle" | "loading" | "ready" | "error";
+type ReadmeSummaryState =
+  | { status: "loading" }
+  | { status: "ready"; summary: ReadmeSummary }
+  | { status: "error"; message: string };
 
 function formatNumber(value: number): string {
   if (value >= 1000000) {
@@ -77,6 +152,10 @@ function isExtensionRuntime(): boolean {
 
 function sendRuntimeMessage(message: RuntimeMessage): Promise<RuntimeResponse> {
   return chrome.runtime.sendMessage(message);
+}
+
+function faviconUrl(url: string): string {
+  return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(url)}&sz=64`;
 }
 
 function EmptyState() {
@@ -132,13 +211,467 @@ function RepoInsight({ repo, compact = false }: { repo: RepoItem; compact?: bool
   );
 }
 
+function RepoTitleButton({ repo, onSelect, className = "repo-title-button" }: {
+  repo: RepoItem;
+  onSelect: (repo: RepoItem) => void;
+  className?: string;
+}) {
+  return (
+    <button className={className.includes("repo-title-button") ? className : `repo-title-button ${className}`} onClick={() => onSelect(repo)} type="button">
+      {repo.fullName}
+      <ExternalLink size={13} />
+    </button>
+  );
+}
+
+function SearchEnginePicker({
+  isOpen,
+  onChange,
+  onOpenChange,
+  value
+}: {
+  isOpen: boolean;
+  onChange: (engine: SearchEngineId) => void;
+  onOpenChange: (open: boolean) => void;
+  value: SearchEngineId;
+}) {
+  const selected = SEARCH_ENGINES.find((engine) => engine.id === value) ?? SEARCH_ENGINES[0];
+
+  return (
+    <div
+      className="engine-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onOpenChange(false);
+        }
+      }}
+    >
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        className="engine-button"
+        onClick={() => onOpenChange(!isOpen)}
+        type="button"
+      >
+        {selected.label}
+        <ChevronDown size={15} />
+      </button>
+      {isOpen && (
+        <div className="engine-menu" role="listbox">
+          {SEARCH_ENGINES.map((engine) => (
+            <button
+              aria-selected={engine.id === value}
+              className={engine.id === value ? "active" : ""}
+              key={engine.id}
+              onClick={() => {
+                onChange(engine.id);
+                onOpenChange(false);
+              }}
+              role="option"
+              type="button"
+            >
+              {engine.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepoDetailDrawer({
+  favoriteNames,
+  onClose,
+  onFavorite,
+  onIgnore,
+  onReloadReadme,
+  readmeState,
+  repo
+}: {
+  favoriteNames: Set<string>;
+  onClose: () => void;
+  onFavorite: (repo: RepoItem) => void;
+  onIgnore: (repo: RepoItem) => void;
+  onReloadReadme: (repo: RepoItem) => void;
+  readmeState?: ReadmeSummaryState;
+  repo: RepoItem | null;
+}) {
+  if (!repo) {
+    return null;
+  }
+
+  const summary = repo.summary ?? createRepoSummary(repo);
+  const isFavorite = favoriteNames.has(repo.fullName);
+
+  return (
+    <div className="drawer-layer" role="presentation">
+      <button aria-label="关闭详情" className="drawer-backdrop" onClick={onClose} type="button" />
+      <aside aria-label="项目详情" aria-modal="true" className="repo-drawer" role="dialog">
+        <div className="drawer-header">
+          <div>
+            <span className="eyebrow">Repository</span>
+            <h2>{repo.fullName}</h2>
+          </div>
+          <button aria-label="关闭详情" className="drawer-close" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="drawer-body">
+          <section className="drawer-section">
+            <h3>中文简介</h3>
+            <p>{repo.description || summary.oneLine}</p>
+          </section>
+
+          {repo.originalDescription && repo.originalDescription !== repo.description && (
+            <section className="drawer-section">
+              <h3>原始描述</h3>
+              <p>{repo.originalDescription}</p>
+            </section>
+          )}
+
+          <section className="drawer-section readme-section">
+            <div className="section-title-row">
+              <h3>README 摘要</h3>
+              {readmeState?.status === "error" && (
+                <button onClick={() => onReloadReadme(repo)} type="button">
+                  重试
+                </button>
+              )}
+            </div>
+
+            {(!readmeState || readmeState.status === "loading") && (
+              <div className="readme-loading">
+                <span />
+                正在读取 README
+              </div>
+            )}
+
+            {readmeState?.status === "error" && <p className="readme-error">{readmeState.message}</p>}
+
+            {readmeState?.status === "ready" && (
+              <div className="readme-summary">
+                <p>{readmeState.summary.overview}</p>
+                {readmeState.summary.highlights.length > 0 && (
+                  <ul>
+                    {readmeState.summary.highlights.map((highlight) => (
+                      <li key={highlight}>{highlight}</li>
+                    ))}
+                  </ul>
+                )}
+                {readmeState.summary.quickStart && (
+                  <code>{readmeState.summary.quickStart}</code>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="drawer-section">
+            <h3>判断信息</h3>
+            <div className="detail-insights">
+              <span>{summary.bestFor}</span>
+              <span>{summary.signal}</span>
+              <span>{repo.language || "Other"}</span>
+            </div>
+          </section>
+
+          {repo.topics.length > 0 && (
+            <section className="drawer-section">
+              <h3>Topics</h3>
+              <div className="topic-list">
+                {repo.topics.slice(0, 10).map((topic) => (
+                  <span key={topic}>{topic}</span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="drawer-metrics" aria-label="项目指标">
+            <div>
+              <span>Star</span>
+              <strong>{formatNumber(repo.stars)}</strong>
+            </div>
+            <div>
+              <span>增长</span>
+              <strong>{repo.growth ? formatNumber(repo.growth) : "-"}</strong>
+            </div>
+            <div>
+              <span>来源</span>
+              <strong>{repo.source}</strong>
+            </div>
+          </section>
+        </div>
+
+        <div className="drawer-actions">
+          <a className="open-github-button" href={repo.url} rel="noreferrer" target="_blank">
+            <ExternalLink size={16} />
+            打开 GitHub
+          </a>
+          <button className={isFavorite ? "drawer-action active" : "drawer-action"} onClick={() => onFavorite(repo)} type="button">
+            {isFavorite ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+            {isFavorite ? "已收藏" : "收藏"}
+          </button>
+          <button className="drawer-action" onClick={() => onIgnore(repo)} type="button">
+            <EyeOff size={16} />
+            忽略
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function LibraryModal({
+  favoriteRepos,
+  ignoredRepos,
+  onClose,
+  onFavorite,
+  onRestore,
+  onSelectRepo
+}: {
+  favoriteRepos: RepoItem[];
+  ignoredRepos: RepoItem[];
+  onClose: () => void;
+  onFavorite: (repo: RepoItem) => void;
+  onRestore: (repo: RepoItem) => void;
+  onSelectRepo: (repo: RepoItem) => void;
+}) {
+  return (
+    <div className="modal-layer" role="presentation">
+      <button aria-label="关闭我的关注" className="modal-backdrop" onClick={onClose} type="button" />
+      <section aria-label="我的关注" aria-modal="true" className="library-modal" role="dialog">
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">Library</span>
+            <h2>我的关注</h2>
+          </div>
+          <button aria-label="关闭我的关注" className="drawer-close" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="library-modal-body">
+          <section>
+            <h3>收藏项目</h3>
+            <div className="library-list modal-library-list">
+              {favoriteRepos.length === 0 ? (
+                <div className="library-empty">暂无收藏项目</div>
+              ) : (
+                favoriteRepos.map((repo) => (
+                  <article className="library-item" key={repo.fullName}>
+                    <RepoTitleButton onSelect={onSelectRepo} repo={repo} />
+                    <button className="library-remove" onClick={() => onFavorite(repo)} title="移出收藏" type="button">
+                      <BookmarkCheck size={15} />
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3>已忽略</h3>
+            {ignoredRepos.length === 0 ? (
+              <div className="library-empty">暂无忽略项目</div>
+            ) : (
+              <div className="ignored-strip modal-ignored-list">
+                {ignoredRepos.map((repo) => (
+                  <button key={repo.fullName} onClick={() => onRestore(repo)} title={`恢复 ${repo.fullName}`} type="button">
+                    <RotateCcw size={13} />
+                    {repo.fullName}
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function WebsiteDock({
+  activeCategory,
+  onChange
+}: {
+  activeCategory: WebsiteCategoryId;
+  onChange: (category: WebsiteCategoryId) => void;
+}) {
+  const category = WEBSITE_CATEGORIES.find((item) => item.id === activeCategory) ?? WEBSITE_CATEGORIES[0];
+
+  return (
+    <nav aria-label="官网导航" className="website-dock">
+      <div className="dock-categories" aria-label="官网导航目录">
+        {WEBSITE_CATEGORIES.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <button
+              aria-label={item.label}
+              className={category.id === item.id ? "active" : ""}
+              key={item.id}
+              onClick={() => onChange(item.id)}
+              title={item.label}
+              type="button"
+            >
+              <Icon size={18} />
+            </button>
+          );
+        })}
+      </div>
+      <div className="dock-links" aria-label={`${category.label}官网`}>
+        {category.links.map((link) => (
+          <a
+            aria-label={`${link.name}：${link.note}`}
+            className="dock-link"
+            href={link.url}
+            key={link.name}
+            rel="noreferrer"
+            target="_blank"
+            title={`${link.name} - ${link.note}`}
+          >
+            <img alt="" src={faviconUrl(link.url)} />
+            <span>{link.name}</span>
+          </a>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function HotTrendsPanel({
+  activeCategory,
+  activeSourceId,
+  error,
+  loadState,
+  onCategoryChange,
+  onReload,
+  onSourceChange,
+  sources
+}: {
+  activeCategory: HotCategory;
+  activeSourceId: string;
+  error: string;
+  loadState: HotLoadState;
+  onCategoryChange: (category: HotCategory) => void;
+  onReload: () => void;
+  onSourceChange: (sourceId: string) => void;
+  sources: HotSource[];
+}) {
+  const filteredSources =
+    activeCategory === "全部" ? sources : sources.filter((source) => source.category === activeCategory);
+  const selectedSource =
+    filteredSources.find((source) => source.id === activeSourceId) ?? filteredSources[0] ?? sources[0];
+
+  return (
+    <div className="panel hot-panel">
+      <div className="panel-heading compact">
+        <div>
+          <span className="eyebrow">Hot Search</span>
+          <h2>国内热搜</h2>
+        </div>
+        <button className="mini-refresh" disabled={loadState === "loading"} onClick={onReload} type="button">
+          <RefreshCw size={14} className={loadState === "loading" ? "spin" : ""} />
+        </button>
+      </div>
+
+      <div className="hot-category-tabs" aria-label="热搜分类">
+        {HOT_CATEGORY_LABELS.map((item) => (
+          <button
+            className={activeCategory === item ? "active" : ""}
+            key={item}
+            onClick={() => onCategoryChange(item)}
+            type="button"
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+
+      {loadState === "error" && sources.length === 0 ? (
+        <div className="hot-empty">
+          <Newspaper size={22} />
+          <span>{error || "暂时无法读取热搜"}</span>
+        </div>
+      ) : (
+        <>
+          <div className="hot-source-strip" aria-label="热搜平台">
+            {filteredSources.slice(0, 14).map((source) => (
+              <button
+                className={selectedSource?.id === source.id ? "active" : ""}
+                key={source.id}
+                onClick={() => onSourceChange(source.id)}
+                type="button"
+              >
+                {source.iconUrl ? <img alt="" src={source.iconUrl} /> : <Newspaper size={14} />}
+                <span>{source.name}</span>
+              </button>
+            ))}
+          </div>
+
+          {selectedSource ? (
+            <div className="hot-list-wrap">
+              <ol className="hot-list">
+                {selectedSource.items.slice(0, 6).map((item) => (
+                  <li key={`${selectedSource.id}-${item.rank}-${item.title}`}>
+                    <a href={item.url} rel="noreferrer" target="_blank" title={item.title}>
+                      <strong>{item.rank}</strong>
+                      <span>{item.title}</span>
+                    </a>
+                  </li>
+                ))}
+              </ol>
+              <div className="hot-footer">
+                <span>{selectedSource.updatedAt}</span>
+                {loadState === "error" && <span>{error}</span>}
+              </div>
+            </div>
+          ) : (
+            <div className="hot-empty">
+              <Newspaper size={22} />
+              <span>{loadState === "loading" ? "正在读取热搜" : "暂无热搜数据"}</span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function buildFeaturedRepos(repos: RepoItem[], ignoredNames: Set<string>): RepoItem[] {
+  const seen = new Set<string>();
+
+  return repos
+    .filter((repo) => !ignoredNames.has(repo.fullName))
+    .filter((repo) => {
+      if (seen.has(repo.fullName)) {
+        return false;
+      }
+
+      seen.add(repo.fullName);
+      return true;
+    })
+    .sort((a, b) => b.growth - a.growth || b.stars - a.stars);
+}
+
 export function App() {
   const [storage, setStorage] = useState<AppStorage | null>(null);
-  const [range, setRange] = useState<TrendRange>("daily");
+  const [range, setRange] = useState<TrendRange>("monthly");
   const [category, setCategory] = useState<RecommendationCategory>("ai");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const [searchEngine, setSearchEngine] = useState<SearchEngineId>("github");
+  const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [websiteCategory, setWebsiteCategory] = useState<WebsiteCategoryId>("ai");
+  const [selectedRepo, setSelectedRepo] = useState<RepoItem | null>(null);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [readmeSummaries, setReadmeSummaries] = useState<Record<string, ReadmeSummaryState>>({});
+  const [hotSources, setHotSources] = useState<HotSource[]>([]);
+  const [hotCategory, setHotCategory] = useState<HotCategory>("全部");
+  const [hotSourceId, setHotSourceId] = useState("");
+  const [hotLoadState, setHotLoadState] = useState<HotLoadState>("idle");
+  const [hotError, setHotError] = useState("");
 
   async function loadDashboard(force = false) {
     setIsRefreshing(true);
@@ -165,9 +698,117 @@ export function App() {
     }
   }
 
+  async function loadHotSources() {
+    setHotLoadState("loading");
+    setHotError("");
+
+    try {
+      const sources = await fetchDomesticHotSources();
+      setHotSources(sources);
+      setHotSourceId((current) => (current && sources.some((source) => source.id === current) ? current : sources[0]?.id ?? ""));
+      setHotLoadState("ready");
+    } catch (error) {
+      setHotError(error instanceof Error ? error.message : "热搜读取失败");
+      setHotLoadState("error");
+    }
+  }
+
   useEffect(() => {
     void loadDashboard(false);
+    void loadHotSources();
   }, []);
+
+  useEffect(() => {
+    const filteredSources =
+      hotCategory === "全部" ? hotSources : hotSources.filter((source) => source.category === hotCategory);
+
+    if (filteredSources.length > 0 && !filteredSources.some((source) => source.id === hotSourceId)) {
+      setHotSourceId(filteredSources[0].id);
+    }
+  }, [hotCategory, hotSourceId, hotSources]);
+
+  useEffect(() => {
+    if (!selectedRepo) {
+      return undefined;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedRepo(null);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    if (!isLibraryOpen) {
+      return undefined;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsLibraryOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isLibraryOpen]);
+
+  useEffect(() => {
+    if (!isEngineMenuOpen) {
+      return undefined;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsEngineMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isEngineMenuOpen]);
+
+  useEffect(() => {
+    if (!selectedRepo) {
+      return;
+    }
+
+    void loadReadmeSummary(selectedRepo);
+  }, [selectedRepo]);
+
+  async function loadReadmeSummary(repo: RepoItem, force = false) {
+    const current = readmeSummaries[repo.fullName];
+
+    if (!force && (current?.status === "ready" || current?.status === "loading")) {
+      return;
+    }
+
+    setReadmeSummaries((items) => ({
+      ...items,
+      [repo.fullName]: { status: "loading" }
+    }));
+
+    try {
+      const summary = await fetchReadmeSummary(repo);
+
+      setReadmeSummaries((items) => ({
+        ...items,
+        [repo.fullName]: { status: "ready", summary }
+      }));
+    } catch (error) {
+      setReadmeSummaries((items) => ({
+        ...items,
+        [repo.fullName]: {
+          status: "error",
+          message: error instanceof Error ? error.message : "README 摘要生成失败"
+        }
+      }));
+    }
+  }
 
   function persistLibraryChange(next: AppStorage) {
     setStorage(next);
@@ -218,6 +859,7 @@ export function App() {
         ignored
       }
     });
+    setSelectedRepo((current) => (current?.fullName === repo.fullName ? null : current));
   }
 
   function restoreRepo(repo: RepoItem) {
@@ -238,67 +880,47 @@ export function App() {
     });
   }
 
-  function updateKeywords(keywords: string[]) {
-    if (!storage) {
+  function submitSearch() {
+    const query = searchQuery.trim();
+
+    if (!query) {
       return;
     }
 
-    persistLibraryChange({
-      ...storage,
-      userLibrary: {
-        ...storage.userLibrary,
-        keywords: normalizeKeywords(keywords)
-      }
-    });
-  }
-
-  function addKeyword() {
-    if (!keywordInput.trim() || !storage) {
-      return;
-    }
-
-    updateKeywords([...storage.userLibrary.keywords, keywordInput]);
-    setKeywordInput("");
-  }
-
-  function removeKeyword(keyword: string) {
-    if (!storage) {
-      return;
-    }
-
-    updateKeywords(storage.userLibrary.keywords.filter((item) => item.toLowerCase() !== keyword.toLowerCase()));
+    const engine = SEARCH_ENGINES.find((item) => item.id === searchEngine) ?? SEARCH_ENGINES[0];
+    window.location.href = engine.buildUrl(query);
   }
 
   const favoriteRepos = Object.values(storage?.userLibrary.favorites ?? {});
   const ignoredRepos = Object.values(storage?.userLibrary.ignored ?? {});
-  const keywords = storage?.userLibrary.keywords ?? [];
   const ignoredNames = new Set(Object.keys(storage?.userLibrary.ignored ?? {}));
   const favoriteNames = new Set(Object.keys(storage?.userLibrary.favorites ?? {}));
-  const repoPool = [
-    ...Object.values(storage?.trending ?? {}).flat(),
-    ...Object.values(storage?.recommendations.byCategory ?? {}).flat()
-  ].filter((repo) => !ignoredNames.has(repo.fullName));
-  const radarRepos = findKeywordMatches(repoPool, keywords, RADAR_VISIBLE_LIMIT);
   const activeTrending = (storage?.trending[range] ?? []).filter((repo) => !ignoredNames.has(repo.fullName));
   const activeRecommendations = (storage?.recommendations.byCategory[category] ?? []).filter(
     (repo) => !ignoredNames.has(repo.fullName)
   );
   const digestItems = storage ? Object.values(storage.digest) : [];
+  const featuredRepos = buildFeaturedRepos(digestItems.flatMap((item) => item.repos), ignoredNames);
 
   return (
-    <main className="shell">
+    <>
+      <WebsiteDock activeCategory={websiteCategory} onChange={setWebsiteCategory} />
+      <main className="shell">
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
             <Github size={25} />
           </div>
           <div>
-            <p>GitHub 趋势首页</p>
             <h1>开源项目实时雷达</h1>
           </div>
         </div>
 
         <div className="top-actions">
+          <button className="library-trigger" onClick={() => setIsLibraryOpen(true)} type="button">
+            <BookmarkCheck size={16} />
+            <span>关注 {favoriteRepos.length}</span>
+          </button>
           <div className="updated-at">
             <CalendarClock size={16} />
             <span>更新 {formatDateTime(storage?.lastUpdated.all)}</span>
@@ -310,13 +932,37 @@ export function App() {
         </div>
       </header>
 
+      <section className="search-portal" aria-label="搜索入口">
+        <form
+          className="search-box"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitSearch();
+          }}
+        >
+          <Search size={18} />
+          <SearchEnginePicker
+            isOpen={isEngineMenuOpen}
+            onChange={setSearchEngine}
+            onOpenChange={setIsEngineMenuOpen}
+            value={searchEngine}
+          />
+          <input
+            aria-label="搜索内容"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={SEARCH_ENGINES.find((item) => item.id === searchEngine)?.placeholder}
+            value={searchQuery}
+          />
+          <button type="submit">搜索</button>
+        </form>
+      </section>
+
       {(loadError || storage?.error) && <AppError message={loadError || storage?.error || ""} />}
 
       <section className="dashboard-grid">
         <div className="panel trend-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">Trending</span>
               <h2>趋势榜</h2>
             </div>
             <div className="segmented" aria-label="趋势榜周期">
@@ -353,10 +999,7 @@ export function App() {
                     <tr key={repo.fullName}>
                       <td>{index + 1}</td>
                       <td>
-                        <a href={repo.url} target="_blank" rel="noreferrer" className="repo-link">
-                          {repo.fullName}
-                          <ExternalLink size={13} />
-                        </a>
+                        <RepoTitleButton className="repo-link repo-link-button" onSelect={setSelectedRepo} repo={repo} />
                         <p title={repo.originalDescription}>{repo.description || "暂无描述"}</p>
                         <RepoInsight repo={repo} />
                       </td>
@@ -402,63 +1045,16 @@ export function App() {
         </div>
 
         <aside className="side-stack">
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
-                <span className="eyebrow">Radar</span>
-                <h2>我的雷达</h2>
-              </div>
-            </div>
-            <div className="radar-panel">
-              <form
-                className="keyword-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  addKeyword();
-                }}
-              >
-                <Radar size={16} />
-                <input
-                  aria-label="关注关键词"
-                  onChange={(event) => setKeywordInput(event.target.value)}
-                  placeholder="MCP / Agent / RAG"
-                  value={keywordInput}
-                />
-                <button aria-label="添加关键词" type="submit">
-                  <Plus size={16} />
-                </button>
-              </form>
-
-              <div className="keyword-tags">
-                {keywords.map((keyword) => (
-                  <button key={keyword} onClick={() => removeKeyword(keyword)} title={`移除 ${keyword}`} type="button">
-                    {keyword}
-                    <X size={13} />
-                  </button>
-                ))}
-              </div>
-
-              <div className="radar-list">
-                {radarRepos.length === 0 ? (
-                  <div className="library-empty">暂无匹配项目</div>
-                ) : (
-                  radarRepos.map((repo) => (
-                    <article className="radar-item" key={repo.fullName}>
-                      <a href={repo.url} target="_blank" rel="noreferrer">
-                        <strong>{repo.fullName}</strong>
-                      </a>
-                      <span>{repo.summary?.bestFor ?? createRepoSummary(repo).bestFor}</span>
-                      <small>
-                        <Star size={13} fill="currentColor" />
-                        {formatNumber(repo.stars)}
-                        {repo.growth ? ` · +${formatNumber(repo.growth)}` : ""}
-                      </small>
-                    </article>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+          <HotTrendsPanel
+            activeCategory={hotCategory}
+            activeSourceId={hotSourceId}
+            error={hotError}
+            loadState={hotLoadState}
+            onCategoryChange={setHotCategory}
+            onReload={() => void loadHotSources()}
+            onSourceChange={setHotSourceId}
+            sources={hotSources}
+          />
 
           <div className="panel">
             <div className="panel-heading compact">
@@ -486,9 +1082,7 @@ export function App() {
                 activeRecommendations.slice(0, RECOMMENDATION_VISIBLE_LIMIT).map((repo) => (
                   <article className="repo-card" key={repo.fullName}>
                     <div className="repo-card-header">
-                      <a href={repo.url} target="_blank" rel="noreferrer">
-                        <strong>{repo.fullName}</strong>
-                      </a>
+                      <RepoTitleButton onSelect={setSelectedRepo} repo={repo} />
                       <div className="row-actions">
                         <IconAction
                           active={favoriteNames.has(repo.fullName)}
@@ -518,61 +1112,69 @@ export function App() {
           <div className="panel">
             <div className="panel-heading compact">
               <div>
-                <span className="eyebrow">Library</span>
-                <h2>我的关注</h2>
-              </div>
-            </div>
-            <div className="library-list">
-              {favoriteRepos.length === 0 ? (
-                <div className="library-empty">暂无收藏项目</div>
-              ) : (
-                favoriteRepos.slice(0, FAVORITE_VISIBLE_LIMIT).map((repo) => (
-                  <article className="library-item" key={repo.fullName}>
-                    <a href={repo.url} target="_blank" rel="noreferrer">
-                      <strong>{repo.fullName}</strong>
-                    </a>
-                    <button onClick={() => favoriteRepo(repo)} title="移出收藏" type="button">
-                      <BookmarkCheck size={15} />
-                    </button>
-                  </article>
-                ))
-              )}
-              {ignoredRepos.length > 0 && (
-                <div className="ignored-strip">
-                  <span>已忽略 {ignoredRepos.length}</span>
-                  {ignoredRepos.slice(0, 3).map((repo) => (
-                    <button key={repo.fullName} onClick={() => restoreRepo(repo)} title={`恢复 ${repo.fullName}`} type="button">
-                      <RotateCcw size={13} />
-                      {repo.fullName}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-heading compact">
-              <div>
                 <span className="eyebrow">Digest</span>
                 <h2>精选开源项目</h2>
               </div>
             </div>
             <div className="digest-list">
-              {digestItems.slice(0, DIGEST_VISIBLE_LIMIT).map((item) => (
-                <article className="digest-card" key={item.key}>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <span>{item.cadence}</span>
-                  </div>
-                  <p>{item.repos.slice(0, 3).map((repo) => repo.fullName).join(" · ") || "等待生成"}</p>
-                  <small>下次 {formatDateTime(item.nextRefreshAt)}</small>
-                </article>
-              ))}
+              {featuredRepos.length === 0 ? (
+                <div className="library-empty">刷新后会根据趋势和推荐生成精选项目。</div>
+              ) : (
+                featuredRepos.slice(0, FEATURED_VISIBLE_LIMIT).map((repo) => (
+                  <article className="featured-card" key={repo.fullName}>
+                    <div className="repo-card-header">
+                      <RepoTitleButton onSelect={setSelectedRepo} repo={repo} />
+                      <div className="row-actions">
+                        <IconAction
+                          active={favoriteNames.has(repo.fullName)}
+                          label={favoriteNames.has(repo.fullName) ? "取消收藏" : "收藏项目"}
+                          onClick={() => favoriteRepo(repo)}
+                        >
+                          {favoriteNames.has(repo.fullName) ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                        </IconAction>
+                        <IconAction label="忽略项目" onClick={() => ignoreRepo(repo)}>
+                          <EyeOff size={16} />
+                        </IconAction>
+                      </div>
+                    </div>
+                    <p title={repo.originalDescription}>{repo.description || "暂无描述"}</p>
+                    <RepoInsight repo={repo} compact />
+                    <small>
+                      <Star size={13} fill="currentColor" />
+                      {formatNumber(repo.stars)}
+                      {repo.growth ? ` · 增长 ${formatNumber(repo.growth)}` : ""}
+                      {repo.language ? ` · ${repo.language}` : ""}
+                    </small>
+                  </article>
+                ))
+              )}
             </div>
           </div>
         </aside>
       </section>
-    </main>
+      <RepoDetailDrawer
+        favoriteNames={favoriteNames}
+        onClose={() => setSelectedRepo(null)}
+        onFavorite={favoriteRepo}
+        onIgnore={ignoreRepo}
+        onReloadReadme={(repo) => void loadReadmeSummary(repo, true)}
+        readmeState={selectedRepo ? readmeSummaries[selectedRepo.fullName] : undefined}
+        repo={selectedRepo}
+      />
+      {isLibraryOpen && (
+        <LibraryModal
+          favoriteRepos={favoriteRepos}
+          ignoredRepos={ignoredRepos}
+          onClose={() => setIsLibraryOpen(false)}
+          onFavorite={favoriteRepo}
+          onRestore={restoreRepo}
+          onSelectRepo={(repo) => {
+            setSelectedRepo(repo);
+            setIsLibraryOpen(false);
+          }}
+        />
+      )}
+      </main>
+    </>
   );
 }

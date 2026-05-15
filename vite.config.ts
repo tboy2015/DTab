@@ -3,6 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      "/hot-proxy/rebang": {
+        target: "https://rebang.open2hub.com",
+        changeOrigin: true,
+        rewrite: () => "/"
+      }
+    }
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,
