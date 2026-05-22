@@ -1,7 +1,9 @@
 {
   "name": "github-trends-newtab",
   "version": "0.1.0",
-  "private": true,
+  "description": "Chrome new tab extension for GitHub trends, repo recommendations, and domestic hot searches.",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",

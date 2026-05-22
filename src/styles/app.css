@@ -1939,7 +1939,7 @@ td p {
   background: #f0fdfa;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1900px) {
   .website-dock {
     position: static;
     display: flex;
