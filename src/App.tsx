@@ -3,23 +3,25 @@ import {
   Bookmark,
   BookmarkCheck,
   CalendarClock,
-  ChevronDown,
   Code2,
+  Edit3,
   ExternalLink,
   Flame,
   Github,
   EyeOff,
   Library,
   Newspaper,
+  Plus,
   RefreshCw,
   RotateCcw,
   Search,
   Sparkles,
   Star,
+  Trash2,
   X
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CATEGORY_LABELS } from "./lib/defaults";
 import { fetchDomesticHotSources, HOT_CATEGORY_LABELS } from "./lib/hot";
 import type { HotCategory, HotSource } from "./lib/hot";
@@ -34,7 +36,8 @@ import type {
   RepoItem,
   RuntimeMessage,
   RuntimeResponse,
-  TrendRange
+  TrendRange,
+  WebsiteLink
 } from "./lib/types";
 import { RECOMMENDATION_CATEGORIES } from "./lib/types";
 
@@ -114,6 +117,7 @@ const WEBSITE_CATEGORIES = [
 
 type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
 type WebsiteCategoryId = (typeof WEBSITE_CATEGORIES)[number]["id"];
+type AppPageId = "github" | "hot";
 type HotLoadState = "idle" | "loading" | "ready" | "error";
 type ReadmeSummaryState =
   | { status: "loading" }
@@ -221,61 +225,6 @@ function RepoTitleButton({ repo, onSelect, className = "repo-title-button" }: {
       {repo.fullName}
       <ExternalLink size={13} />
     </button>
-  );
-}
-
-function SearchEnginePicker({
-  isOpen,
-  onChange,
-  onOpenChange,
-  value
-}: {
-  isOpen: boolean;
-  onChange: (engine: SearchEngineId) => void;
-  onOpenChange: (open: boolean) => void;
-  value: SearchEngineId;
-}) {
-  const selected = SEARCH_ENGINES.find((engine) => engine.id === value) ?? SEARCH_ENGINES[0];
-
-  return (
-    <div
-      className="engine-picker"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          onOpenChange(false);
-        }
-      }}
-    >
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-        className="engine-button"
-        onClick={() => onOpenChange(!isOpen)}
-        type="button"
-      >
-        {selected.label}
-        <ChevronDown size={15} />
-      </button>
-      {isOpen && (
-        <div className="engine-menu" role="listbox">
-          {SEARCH_ENGINES.map((engine) => (
-            <button
-              aria-selected={engine.id === value}
-              className={engine.id === value ? "active" : ""}
-              key={engine.id}
-              onClick={() => {
-                onChange(engine.id);
-                onOpenChange(false);
-              }}
-              role="option"
-              type="button"
-            >
-              {engine.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -492,15 +441,45 @@ function LibraryModal({
 
 function WebsiteDock({
   activeCategory,
+  activePage,
+  links,
+  onEditLinks,
+  onPageChange,
   onChange
 }: {
   activeCategory: WebsiteCategoryId;
+  activePage: AppPageId;
+  links: WebsiteLink[];
+  onEditLinks: (category: WebsiteCategoryId) => void;
+  onPageChange: (page: AppPageId) => void;
   onChange: (category: WebsiteCategoryId) => void;
 }) {
   const category = WEBSITE_CATEGORIES.find((item) => item.id === activeCategory) ?? WEBSITE_CATEGORIES[0];
+  const pageItems = [
+    { id: "github" as const, label: "GitHub 资讯", icon: Github },
+    { id: "hot" as const, label: "国内热搜", icon: Newspaper }
+  ];
 
   return (
     <nav aria-label="官网导航" className="website-dock">
+      <div className="page-nav" aria-label="页面导航">
+        {pageItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <button
+              aria-current={activePage === item.id ? "page" : undefined}
+              className={activePage === item.id ? "active" : ""}
+              key={item.id}
+              onClick={() => onPageChange(item.id)}
+              type="button"
+            >
+              <Icon size={17} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="dock-categories" aria-label="官网导航目录">
         {WEBSITE_CATEGORIES.map((item) => {
           const Icon = item.icon;
@@ -520,7 +499,13 @@ function WebsiteDock({
         })}
       </div>
       <div className="dock-links" aria-label={`${category.label}官网`}>
-        {category.links.map((link) => (
+        <div className="dock-links-header">
+          <span>{category.label}</span>
+          <button aria-label={`编辑${category.label}官网`} onClick={() => onEditLinks(category.id)} title="编辑官网" type="button">
+            <Edit3 size={14} />
+          </button>
+        </div>
+        {links.map((link) => (
           <a
             aria-label={`${link.name}：${link.note}`}
             className="dock-link"
@@ -539,6 +524,89 @@ function WebsiteDock({
   );
 }
 
+function WebsiteLinksModal({
+  categoryLabel,
+  links,
+  onAdd,
+  onChange,
+  onClose,
+  onRemove,
+  onSave
+}: {
+  categoryLabel: string;
+  links: WebsiteLink[];
+  onAdd: () => void;
+  onChange: (index: number, field: keyof WebsiteLink, value: string) => void;
+  onClose: () => void;
+  onRemove: (index: number) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="modal-layer" role="presentation">
+      <button aria-label="关闭官网编辑" className="modal-backdrop" onClick={onClose} type="button" />
+      <section aria-label="编辑快捷官网" aria-modal="true" className="website-editor-modal" role="dialog">
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">Quick Links</span>
+            <h2>编辑{categoryLabel}官网</h2>
+          </div>
+          <button aria-label="关闭官网编辑" className="drawer-close" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="website-editor-body">
+          {links.map((link, index) => (
+            <article className="website-editor-row" key={index}>
+              <label>
+                <span>名称</span>
+                <input
+                  onChange={(event) => onChange(index, "name", event.target.value)}
+                  placeholder="ChatGPT"
+                  value={link.name}
+                />
+              </label>
+              <label>
+                <span>网址</span>
+                <input
+                  onChange={(event) => onChange(index, "url", event.target.value)}
+                  placeholder="https://example.com"
+                  value={link.url}
+                />
+              </label>
+              <label>
+                <span>说明</span>
+                <input
+                  onChange={(event) => onChange(index, "note", event.target.value)}
+                  placeholder="一句话说明"
+                  value={link.note}
+                />
+              </label>
+              <button aria-label={`删除 ${link.name || "官网"}`} className="website-row-remove" onClick={() => onRemove(index)} type="button">
+                <Trash2 size={16} />
+              </button>
+            </article>
+          ))}
+
+          <button className="website-add-link" onClick={onAdd} type="button">
+            <Plus size={16} />
+            添加官网
+          </button>
+        </div>
+
+        <div className="website-editor-actions">
+          <button className="drawer-action" onClick={onClose} type="button">
+            取消
+          </button>
+          <button className="open-github-button" onClick={onSave} type="button">
+            保存
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function HotTrendsPanel({
   activeCategory,
   activeSourceId,
@@ -547,6 +615,7 @@ function HotTrendsPanel({
   onCategoryChange,
   onReload,
   onSourceChange,
+  variant = "compact",
   sources
 }: {
   activeCategory: HotCategory;
@@ -556,12 +625,117 @@ function HotTrendsPanel({
   onCategoryChange: (category: HotCategory) => void;
   onReload: () => void;
   onSourceChange: (sourceId: string) => void;
+  variant?: "compact" | "wide";
   sources: HotSource[];
 }) {
   const filteredSources =
     activeCategory === "全部" ? sources : sources.filter((source) => source.category === activeCategory);
   const selectedSource =
     filteredSources.find((source) => source.id === activeSourceId) ?? filteredSources[0] ?? sources[0];
+  const itemLimit = variant === "wide" ? 18 : 6;
+  const featuredSources = filteredSources.slice(0, 4);
+  const categorySections = (["科技", "新闻", "财经", "娱乐", "综合"] as Exclude<HotCategory, "全部">[])
+    .map((category) => ({
+      category,
+      sources: sources.filter((source) => source.category === category)
+    }))
+    .filter((section) => section.sources.length > 0);
+  const boardSections =
+    activeCategory === "全部"
+      ? [
+          ...(featuredSources.length > 0 ? [{ category: "推荐", sources: featuredSources }] : []),
+          ...categorySections
+        ]
+      : [{ category: activeCategory, sources: filteredSources }];
+
+  if (variant === "wide") {
+    return (
+      <div className="hot-board-page">
+        <div className="hot-board-tabs" aria-label="热搜分类">
+          {HOT_CATEGORY_LABELS.map((item) => (
+            <button
+              className={activeCategory === item ? "active" : ""}
+              key={item}
+              onClick={() => onCategoryChange(item)}
+              type="button"
+            >
+              {item}
+            </button>
+          ))}
+          <button className="hot-board-refresh" disabled={loadState === "loading"} onClick={onReload} type="button">
+            <RefreshCw size={14} className={loadState === "loading" ? "spin" : ""} />
+            <span>{loadState === "loading" ? "刷新中" : "刷新"}</span>
+          </button>
+        </div>
+
+        {loadState === "error" && sources.length === 0 ? (
+          <div className="panel hot-empty hot-board-empty">
+            <Newspaper size={22} />
+            <span>{error || "暂时无法读取热搜"}</span>
+          </div>
+        ) : (
+          <>
+            <section className="hot-source-gallery" aria-label="热门平台">
+              <div className="hot-section-title">热门</div>
+              <div className="hot-source-rail">
+                {filteredSources.slice(0, 18).map((source) => (
+                  <a href={source.items[0]?.url ?? "#"} key={source.id} rel="noreferrer" target="_blank">
+                    <span className="hot-source-logo">
+                      {source.iconUrl ? <img alt="" src={source.iconUrl} /> : <Newspaper size={24} />}
+                    </span>
+                    <strong>{source.name}</strong>
+                    <small>{source.category}</small>
+                  </a>
+                ))}
+              </div>
+            </section>
+
+            {boardSections.map((section) => (
+              <section className="hot-board-section" key={section.category}>
+                <div className="hot-section-title">{section.category}</div>
+                <div className="hot-card-grid">
+                  {section.sources.map((source) => (
+                    <article className="hot-rank-card" key={`${section.category}-${source.id}`}>
+                      <div className="hot-rank-card-header">
+                        <div>
+                          {source.iconUrl ? <img alt="" src={source.iconUrl} /> : <Newspaper size={16} />}
+                          <h3>{source.name}</h3>
+                        </div>
+                        <span>{source.category}</span>
+                      </div>
+                      <ol className="hot-rank-list">
+                        {source.items.slice(0, 10).map((item) => (
+                          <li key={`${source.id}-${item.rank}-${item.title}`}>
+                            <a href={item.url} rel="noreferrer" target="_blank" title={item.title}>
+                              <strong>{item.rank}</strong>
+                              <span>{item.title}</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="hot-rank-card-footer">
+                        <span>{source.updatedAt || "刚刚更新"}</span>
+                        <button aria-label={`刷新 ${source.name}`} onClick={onReload} type="button">
+                          <RefreshCw size={13} />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {boardSections.length === 0 && (
+              <div className="panel hot-empty hot-board-empty">
+                <Newspaper size={22} />
+                <span>{loadState === "loading" ? "正在读取热搜" : "暂无热搜数据"}</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="panel hot-panel">
@@ -612,7 +786,7 @@ function HotTrendsPanel({
           {selectedSource ? (
             <div className="hot-list-wrap">
               <ol className="hot-list">
-                {selectedSource.items.slice(0, 6).map((item) => (
+                {selectedSource.items.slice(0, itemLimit).map((item) => (
                   <li key={`${selectedSource.id}-${item.rank}-${item.title}`}>
                     <a href={item.url} rel="noreferrer" target="_blank" title={item.title}>
                       <strong>{item.rank}</strong>
@@ -656,14 +830,17 @@ function buildFeaturedRepos(repos: RepoItem[], ignoredNames: Set<string>): RepoI
 
 export function App() {
   const [storage, setStorage] = useState<AppStorage | null>(null);
+  const [activePage, setActivePage] = useState<AppPageId>("github");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [range, setRange] = useState<TrendRange>("monthly");
   const [category, setCategory] = useState<RecommendationCategory>("ai");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [searchEngine, setSearchEngine] = useState<SearchEngineId>("github");
-  const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
+  const [searchEngine, setSearchEngine] = useState<SearchEngineId>("google");
   const [searchQuery, setSearchQuery] = useState("");
   const [websiteCategory, setWebsiteCategory] = useState<WebsiteCategoryId>("ai");
+  const [editingWebsiteCategory, setEditingWebsiteCategory] = useState<WebsiteCategoryId | null>(null);
+  const [websiteDraftLinks, setWebsiteDraftLinks] = useState<WebsiteLink[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<RepoItem | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [readmeSummaries, setReadmeSummaries] = useState<Record<string, ReadmeSummaryState>>({});
@@ -719,6 +896,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (activePage === "github") {
+      window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    }
+  }, [activePage]);
+
+  useEffect(() => {
     const filteredSources =
       hotCategory === "全部" ? hotSources : hotSources.filter((source) => source.category === hotCategory);
 
@@ -756,21 +939,6 @@ export function App() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isLibraryOpen]);
-
-  useEffect(() => {
-    if (!isEngineMenuOpen) {
-      return undefined;
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsEngineMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isEngineMenuOpen]);
 
   useEffect(() => {
     if (!selectedRepo) {
@@ -880,6 +1048,51 @@ export function App() {
     });
   }
 
+  function getWebsiteLinks(categoryId: WebsiteCategoryId): WebsiteLink[] {
+    const defaultCategory = WEBSITE_CATEGORIES.find((item) => item.id === categoryId) ?? WEBSITE_CATEGORIES[0];
+    return (storage?.websiteLinks?.[categoryId] ?? defaultCategory.links).map((link) => ({ ...link }));
+  }
+
+  function openWebsiteEditor(categoryId: WebsiteCategoryId) {
+    setEditingWebsiteCategory(categoryId);
+    setWebsiteDraftLinks(getWebsiteLinks(categoryId));
+  }
+
+  function updateWebsiteDraftLink(index: number, field: keyof WebsiteLink, value: string) {
+    setWebsiteDraftLinks((links) =>
+      links.map((link, itemIndex) => (itemIndex === index ? { ...link, [field]: value } : link))
+    );
+  }
+
+  function saveWebsiteLinks() {
+    if (!storage || !editingWebsiteCategory) {
+      return;
+    }
+
+    const normalizedLinks = websiteDraftLinks
+      .map((link) => ({
+        name: link.name.trim(),
+        url: link.url.trim(),
+        note: link.note.trim() || "快捷入口",
+        mark: link.mark?.trim() || undefined
+      }))
+      .filter((link) => link.name && link.url);
+
+    if (normalizedLinks.some((link) => !/^https?:\/\//i.test(link.url))) {
+      setLoadError("官网地址需要以 http:// 或 https:// 开头");
+      return;
+    }
+
+    persistLibraryChange({
+      ...storage,
+      websiteLinks: {
+        ...storage.websiteLinks,
+        [editingWebsiteCategory]: normalizedLinks
+      }
+    });
+    setEditingWebsiteCategory(null);
+  }
+
   function submitSearch() {
     const query = searchQuery.trim();
 
@@ -901,10 +1114,21 @@ export function App() {
   );
   const digestItems = storage ? Object.values(storage.digest) : [];
   const featuredRepos = buildFeaturedRepos(digestItems.flatMap((item) => item.repos), ignoredNames);
+  const activeWebsiteLinks = getWebsiteLinks(websiteCategory);
+  const editingWebsiteLabel = editingWebsiteCategory
+    ? WEBSITE_CATEGORIES.find((item) => item.id === editingWebsiteCategory)?.label ?? ""
+    : "";
 
   return (
     <>
-      <WebsiteDock activeCategory={websiteCategory} onChange={setWebsiteCategory} />
+      <WebsiteDock
+        activeCategory={websiteCategory}
+        activePage={activePage}
+        links={activeWebsiteLinks}
+        onChange={setWebsiteCategory}
+        onEditLinks={openWebsiteEditor}
+        onPageChange={setActivePage}
+      />
       <main className="shell">
       <header className="topbar">
         <div className="brand">
@@ -912,9 +1136,53 @@ export function App() {
             <Github size={25} />
           </div>
           <div>
-            <h1>开源项目实时雷达</h1>
+            <h1>{activePage === "hot" ? "国内热榜聚合" : "开源项目实时雷达"}</h1>
           </div>
         </div>
+
+        {activePage === "github" && (
+          <section className="topbar-search" aria-label="搜索入口">
+            <form
+              className="search-box"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitSearch();
+              }}
+            >
+              <div className="search-main">
+                <label className="visually-hidden" htmlFor="dashboard-search">
+                  搜索内容
+                </label>
+                <Search size={19} />
+                <input
+                  aria-label="搜索内容"
+                  id="dashboard-search"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={SEARCH_ENGINES.find((item) => item.id === searchEngine)?.placeholder}
+                  ref={searchInputRef}
+                  value={searchQuery}
+                />
+                <button type="submit">
+                  <Search size={15} />
+                  <span>搜索</span>
+                </button>
+              </div>
+              <div className="engine-tabs" aria-label="搜索引擎">
+                {SEARCH_ENGINES.map((engine) => (
+                  <button
+                    aria-pressed={searchEngine === engine.id}
+                    className={searchEngine === engine.id ? "active" : ""}
+                    key={engine.id}
+                    onClick={() => setSearchEngine(engine.id)}
+                    type="button"
+                  >
+                    {engine.label}
+                  </button>
+                ))}
+              </div>
+            </form>
+          </section>
+        )}
 
         <div className="top-actions">
           <button className="library-trigger" onClick={() => setIsLibraryOpen(true)} type="button">
@@ -932,34 +1200,10 @@ export function App() {
         </div>
       </header>
 
-      <section className="search-portal" aria-label="搜索入口">
-        <form
-          className="search-box"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitSearch();
-          }}
-        >
-          <Search size={18} />
-          <SearchEnginePicker
-            isOpen={isEngineMenuOpen}
-            onChange={setSearchEngine}
-            onOpenChange={setIsEngineMenuOpen}
-            value={searchEngine}
-          />
-          <input
-            aria-label="搜索内容"
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={SEARCH_ENGINES.find((item) => item.id === searchEngine)?.placeholder}
-            value={searchQuery}
-          />
-          <button type="submit">搜索</button>
-        </form>
-      </section>
-
       {(loadError || storage?.error) && <AppError message={loadError || storage?.error || ""} />}
 
-      <section className="dashboard-grid">
+      {activePage === "github" ? (
+      <section className="dashboard-grid github-page">
         <div className="panel trend-panel">
           <div className="panel-heading">
             <div>
@@ -1045,17 +1289,6 @@ export function App() {
         </div>
 
         <aside className="side-stack">
-          <HotTrendsPanel
-            activeCategory={hotCategory}
-            activeSourceId={hotSourceId}
-            error={hotError}
-            loadState={hotLoadState}
-            onCategoryChange={setHotCategory}
-            onReload={() => void loadHotSources()}
-            onSourceChange={setHotSourceId}
-            sources={hotSources}
-          />
-
           <div className="panel">
             <div className="panel-heading compact">
               <div>
@@ -1152,6 +1385,21 @@ export function App() {
           </div>
         </aside>
       </section>
+      ) : (
+        <section className="hot-page-grid" aria-label="国内热搜页面">
+          <HotTrendsPanel
+            activeCategory={hotCategory}
+            activeSourceId={hotSourceId}
+            error={hotError}
+            loadState={hotLoadState}
+            onCategoryChange={setHotCategory}
+            onReload={() => void loadHotSources()}
+            onSourceChange={setHotSourceId}
+            sources={hotSources}
+            variant="wide"
+          />
+        </section>
+      )}
       <RepoDetailDrawer
         favoriteNames={favoriteNames}
         onClose={() => setSelectedRepo(null)}
@@ -1172,6 +1420,17 @@ export function App() {
             setSelectedRepo(repo);
             setIsLibraryOpen(false);
           }}
+        />
+      )}
+      {editingWebsiteCategory && (
+        <WebsiteLinksModal
+          categoryLabel={editingWebsiteLabel}
+          links={websiteDraftLinks}
+          onAdd={() => setWebsiteDraftLinks((links) => [...links, { name: "", url: "https://", note: "" }])}
+          onChange={updateWebsiteDraftLink}
+          onClose={() => setEditingWebsiteCategory(null)}
+          onRemove={(index) => setWebsiteDraftLinks((links) => links.filter((_, itemIndex) => itemIndex !== index))}
+          onSave={saveWebsiteLinks}
         />
       )}
       </main>

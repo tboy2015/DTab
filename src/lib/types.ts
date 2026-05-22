@@ -51,6 +51,15 @@ export interface UserLibrary {
   ignored: Record<string, RepoItem>;
 }
 
+export interface WebsiteLink {
+  name: string;
+  url: string;
+  note: string;
+  mark?: string;
+}
+
+export type WebsiteLinkCategory = "ai" | "coding" | "resources";
+
 export interface AppStorage {
   trending: Record<TrendRange, RepoItem[]>;
   recommendations: {
@@ -58,6 +67,7 @@ export interface AppStorage {
   };
   digest: Record<DigestKey, DigestItem>;
   userLibrary: UserLibrary;
+  websiteLinks?: Partial<Record<WebsiteLinkCategory, WebsiteLink[]>>;
   lastUpdated: Partial<Record<TrendRange | RecommendationCategory | DigestKey | "all", string>>;
   nextRefreshAt: Partial<Record<DigestKey | "daily" | "weekly" | "monthly", string>>;
   error?: string;

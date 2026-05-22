@@ -67,6 +67,7 @@ export function createEmptyStorage(now = new Date()): AppStorage {
       favorites: {},
       ignored: {}
     },
+    websiteLinks: {},
     lastUpdated: {},
     nextRefreshAt: {
       daily: getNextRefreshSchedule("dailyTop10", now),
@@ -112,6 +113,10 @@ export function mergeStorage(base: AppStorage, patch?: Partial<AppStorage>): App
         ...base.userLibrary.ignored,
         ...patch.userLibrary?.ignored
       }
+    },
+    websiteLinks: {
+      ...base.websiteLinks,
+      ...patch.websiteLinks
     },
     lastUpdated: {
       ...base.lastUpdated,

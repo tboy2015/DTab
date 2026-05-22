@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { readmeInternals, summarizeReadmeMarkdown } from "./readme";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchReadmeMarkdown, readmeInternals, summarizeReadmeMarkdown } from "./readme";
 
 const repo = {
   fullName: "owner/project",
   description: "A useful developer tool."
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("readme helpers", () => {
   it("extracts a compact readme summary", () => {
@@ -46,6 +50,23 @@ npm run dev
   it("cleans markdown links and inline code", () => {
     expect(readmeInternals.stripMarkdown("Use [`foo`](https://example.com) with `bar`.")).toBe(
       "Use foo with bar."
+    );
+  });
+});
+
+describe("fetchReadmeMarkdown", () => {
+  it("falls back to raw GitHub README files when the API is rate limited", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 403 })
+      .mockResolvedValueOnce({ ok: true, text: async () => "# Raw README" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReadmeMarkdown("owner/project")).resolves.toBe("# Raw README");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://raw.githubusercontent.com/owner/project/main/README.md",
+      expect.objectContaining({ cache: "force-cache" })
     );
   });
 });

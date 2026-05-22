@@ -146,8 +146,9 @@ export async function fetchReadmeMarkdown(fullName: string): Promise<string> {
     throw new Error("仓库名格式不正确");
   }
 
+  const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`;
   const response = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`,
+    apiUrl,
     {
       headers: {
         Accept: "application/vnd.github.raw",
@@ -156,11 +157,43 @@ export async function fetchReadmeMarkdown(fullName: string): Promise<string> {
     }
   );
 
+  if (response.ok) {
+    return response.text();
+  }
+
+  if (response.status === 403 || response.status === 429) {
+    const rawMarkdown = await fetchRawReadmeMarkdown(owner, repo);
+
+    if (rawMarkdown) {
+      return rawMarkdown;
+    }
+  }
+
   if (!response.ok) {
     throw new Error(response.status === 404 ? "这个仓库没有可读取的 README" : `README 请求失败：${response.status}`);
   }
 
   return response.text();
+}
+
+async function fetchRawReadmeMarkdown(owner: string, repo: string): Promise<string | null> {
+  const branches = ["main", "master"];
+  const filenames = ["README.md", "readme.md", "README"];
+
+  for (const branch of branches) {
+    for (const filename of filenames) {
+      const response = await fetch(
+        `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branch}/${filename}`,
+        { cache: "force-cache" }
+      );
+
+      if (response.ok) {
+        return response.text();
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function fetchReadmeSummary(repo: RepoItem): Promise<ReadmeSummary> {

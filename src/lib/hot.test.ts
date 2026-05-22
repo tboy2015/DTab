@@ -38,6 +38,45 @@ describe("parseRebangHtml", () => {
       url: "https://so.douyin.com/search/a"
     });
   });
+
+  it.skipIf(typeof DOMParser === "undefined")("parses the current rebang card markup", () => {
+    const sources = parseRebangHtml(`
+      <section class="card" data-filter="娱乐">
+        <div class="card-header">
+          <div class="icon-square">
+            <img src="https://rebang.open2hub.com/425.jpg">
+          </div>
+          <div class="header-content">
+            <h3>抖音</h3>
+            <p>半小时内更新</p>
+          </div>
+        </div>
+        <div class="list-container">
+          <a href="https://so.douyin.com/s?keyword=a" class="list-item">
+            <span class="list-number">1</span>
+            <span class="list-text">第一条热搜</span>
+          </a>
+          <a href="https://so.douyin.com/s?keyword=b" class="list-item">
+            <span class="list-number">2</span>
+            <span class="list-text">第二条热搜</span>
+          </a>
+        </div>
+      </section>
+    `);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      name: "抖音",
+      category: "娱乐",
+      iconUrl: "https://rebang.open2hub.com/425.jpg",
+      updatedAt: "半小时内更新"
+    });
+    expect(sources[0].items[0]).toMatchObject({
+      rank: 1,
+      title: "第一条热搜",
+      url: "https://so.douyin.com/s?keyword=a"
+    });
+  });
 });
 
 describe("getRebangFetchUrl", () => {

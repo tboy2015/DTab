@@ -70,14 +70,14 @@ export function parseRebangHtml(html: string): HotSource[] {
   return sortSources(
     cards
       .map((card): HotSource | null => {
-        const name = textContent(card.querySelector(".platform-name-span"));
-        const iconUrl = card.querySelector<HTMLImageElement>(".platform-icon img")?.src;
-        const footer = textContent(card.querySelector(".update-footer"));
+        const name = textContent(card.querySelector(".platform-name-span, .header-content h3"));
+        const iconUrl = card.querySelector<HTMLImageElement>(".platform-icon img, .icon-square img")?.src;
+        const footer = textContent(card.querySelector(".update-footer, .header-content p"));
         const items = Array.from(card.querySelectorAll<HTMLAnchorElement>(".list-item"))
           .slice(0, 10)
           .map((item, index) => ({
-            rank: Number(item.dataset.rank) || index + 1,
-            title: textContent(item.querySelector("span")),
+            rank: Number(item.dataset.rank) || Number(textContent(item.querySelector(".list-number"))) || index + 1,
+            title: textContent(item.querySelector(".list-text")) || textContent(item.querySelector("span")),
             url: item.href
           }))
           .filter((item) => item.title && item.url);
