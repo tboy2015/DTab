@@ -64,3 +64,8 @@ npm run build
 ## 许可证
 
 [MIT](./LICENSE)
+
+## 发布流程
+
+- 发布步骤说明：[RELEASE.md](./RELEASE.md)
+- Release 文案模板：[RELEASE_NOTES_TEMPLATE.md](./RELEASE_NOTES_TEMPLATE.md)
