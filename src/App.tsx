@@ -18,6 +18,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Wrench,
   X
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -40,6 +41,7 @@ import type {
   WebsiteLink
 } from "./lib/types";
 import { RECOMMENDATION_CATEGORIES } from "./lib/types";
+import { JsonTool } from "./components/JsonTool";
 
 const RANGE_LABELS: Record<TrendRange, string> = {
   daily: "每日",
@@ -117,7 +119,7 @@ const WEBSITE_CATEGORIES = [
 
 type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
 type WebsiteCategoryId = (typeof WEBSITE_CATEGORIES)[number]["id"];
-type AppPageId = "github" | "hot";
+type AppPageId = "github" | "hot" | "tools";
 type HotLoadState = "idle" | "loading" | "ready" | "error";
 type ReadmeSummaryState =
   | { status: "loading" }
@@ -457,7 +459,8 @@ function WebsiteDock({
   const category = WEBSITE_CATEGORIES.find((item) => item.id === activeCategory) ?? WEBSITE_CATEGORIES[0];
   const pageItems = [
     { id: "github" as const, label: "GitHub 资讯", icon: Github },
-    { id: "hot" as const, label: "国内热搜", icon: Newspaper }
+    { id: "hot" as const, label: "国内热搜", icon: Newspaper },
+    { id: "tools" as const, label: "工具箱", icon: Wrench }
   ];
 
   return (
@@ -1136,7 +1139,7 @@ export function App() {
             <Github size={25} />
           </div>
           <div>
-            <h1>{activePage === "hot" ? "国内热榜聚合" : "开源项目实时雷达"}</h1>
+            <h1>{activePage === "hot" ? "国内热榜聚合" : activePage === "tools" ? "工具箱" : "开源项目实时雷达"}</h1>
           </div>
         </div>
 
@@ -1201,6 +1204,8 @@ export function App() {
       </header>
 
       {(loadError || storage?.error) && <AppError message={loadError || storage?.error || ""} />}
+
+      {activePage === "tools" && <JsonTool />}
 
       {activePage === "github" ? (
       <section className="dashboard-grid github-page">
@@ -1385,7 +1390,7 @@ export function App() {
           </div>
         </aside>
       </section>
-      ) : (
+      ) : activePage === "hot" ? (
         <section className="hot-page-grid" aria-label="国内热搜页面">
           <HotTrendsPanel
             activeCategory={hotCategory}
@@ -1399,7 +1404,7 @@ export function App() {
             variant="wide"
           />
         </section>
-      )}
+      ) : null}
       <RepoDetailDrawer
         favoriteNames={favoriteNames}
         onClose={() => setSelectedRepo(null)}
