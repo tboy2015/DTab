@@ -2263,6 +2263,69 @@ td p {
   color: #1f2933;
 }
 
+.json-tree-output {
+  font-family: "Fira Code", "Cascadia Code", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.json-tree-line {
+  display: flex;
+  align-items: center;
+  min-height: 21px;
+}
+
+.json-fold-toggle,
+.json-bracket-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.json-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 2px 0 -2px;
+  padding: 0;
+  border-radius: 4px;
+  color: #64748b;
+}
+
+.json-fold-toggle:hover,
+.json-bracket-button:hover {
+  background: #e8eef5;
+}
+
+.json-bracket-button {
+  padding: 0 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.json-tree-spacer {
+  width: 18px;
+  margin-right: 2px;
+  flex: 0 0 auto;
+}
+
+.json-tree-key {
+  color: #111827;
+}
+
+.json-tree-value {
+  color: #111827;
+}
+
+.json-tree-summary {
+  color: #94a3b8;
+}
+
 .json-placeholder {
   color: #aab4c0;
   font-style: italic;
