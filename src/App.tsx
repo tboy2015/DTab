@@ -41,7 +41,7 @@ import type {
   WebsiteLink
 } from "./lib/types";
 import { RECOMMENDATION_CATEGORIES } from "./lib/types";
-import { JsonTool } from "./components/JsonTool";
+import { ToolsPage } from "./components/ToolsPage";
 
 const RANGE_LABELS: Record<TrendRange, string> = {
   daily: "每日",
@@ -1205,7 +1205,7 @@ export function App() {
 
       {(loadError || storage?.error) && <AppError message={loadError || storage?.error || ""} />}
 
-      {activePage === "tools" && <JsonTool />}
+      {activePage === "tools" && <ToolsPage />}
 
       {activePage === "github" ? (
       <section className="dashboard-grid github-page">
