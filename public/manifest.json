@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GitHub 趋势首页",
   "description": "在 Chrome 新标签页查看 GitHub 趋势、精选开源项目和国内热搜榜。",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "permissions": ["alarms", "storage", "activeTab", "scripting", "contextMenus", "downloads"],
   "host_permissions": [
     "https://github.com/*",
