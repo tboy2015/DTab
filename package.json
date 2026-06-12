@@ -7,17 +7,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "sync:vendor": "cp node_modules/@mozilla/readability/Readability.js public/vendor/Readability.js && cp node_modules/turndown/dist/turndown.js public/vendor/turndown.js && cp node_modules/turndown-plugin-gfm/dist/turndown-plugin-gfm.js public/vendor/turndown-plugin-gfm.js",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11",
-    "typescript": "^5.8.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
+    "typescript": "^5.8.0",
+    "vite": "^5.4.11"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.320",

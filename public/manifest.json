@@ -3,13 +3,16 @@
   "name": "GitHub 趋势首页",
   "description": "在 Chrome 新标签页查看 GitHub 趋势、精选开源项目和国内热搜榜。",
   "version": "0.1.1",
-  "permissions": ["alarms", "storage"],
+  "permissions": ["alarms", "storage", "activeTab", "scripting", "contextMenus", "downloads"],
   "host_permissions": [
     "https://github.com/*",
     "https://api.github.com/*",
     "https://rebang.open2hub.com/*",
     "https://translate.googleapis.com/*"
   ],
+  "action": {
+    "default_title": "保存为 Markdown"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

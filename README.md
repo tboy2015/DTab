@@ -9,6 +9,17 @@
 - 国内热搜聚合页
 - 仓库详情抽屉：README 摘要、收藏、忽略
 - 左侧快捷官网导航（支持手动编辑）
+- 网页剪藏：在任意网页右键「保存为 Markdown」，或点击工具栏图标，将正文转成 `.md` 下载到本地
+
+## 网页剪藏
+
+在任意网页上：
+
+- 右键菜单选择 **保存为 Markdown**，或点击浏览器工具栏的扩展图标；
+- 扩展会用 [Readability](https://github.com/mozilla/readability) 提取正文、用 [Turndown](https://github.com/mixmark-io/turndown) 转成 Markdown，附带 YAML front-matter（标题/来源/作者/日期），下载为 `YYYY-MM-DD-标题.md`；
+- 图标徽标反馈：`✓` 提取成功，`≈` 走了整页兜底，`×` 当前页不支持（浏览器内置页 / 商店页）。
+
+依赖的第三方库以 UMD 形式放在 `public/vendor/`，注入目标页执行；升级依赖后运行 `npm run sync:vendor` 同步。
 
 ## 给普通用户：从 GitHub 下载 ZIP 并本地安装
 
