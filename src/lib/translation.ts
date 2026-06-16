@@ -1,4 +1,5 @@
 import type { RepoItem } from "./types";
+import type { TranslationTargetLanguage } from "./types";
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const CHINESE_TEXT_PATTERN = /[\u3400-\u9fff]/;
@@ -31,11 +32,14 @@ function readTranslatedText(payload: unknown): string {
     .trim();
 }
 
-export async function translateTextToChinese(text: string): Promise<string> {
+export async function translateTextToChinese(
+  text: string,
+  targetLanguage: TranslationTargetLanguage = "zh-CN"
+): Promise<string> {
   const params = new URLSearchParams({
     client: "gtx",
     sl: "auto",
-    tl: "zh-CN",
+    tl: targetLanguage,
     dt: "t",
     q: text
   });

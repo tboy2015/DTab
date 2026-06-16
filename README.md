@@ -1,6 +1,6 @@
-# GitHub 趋势首页 Chrome 扩展
+# DTab 双语助手 Chrome 扩展
 
-一个 Manifest V3 新标签页扩展，用来查看 GitHub 每日、每周、每月趋势榜，热门 AI/ChatGPT/算法/工具仓库推荐，以及自动汇总的周刊/月刊入口。
+一个 Manifest V3 Chrome 扩展，用来查看 GitHub 趋势、国内热搜和开发资讯，并提供网页双语对照翻译、右键翻译、侧边栏文本翻译与网页剪藏。
 
 ## 功能
 
@@ -24,7 +24,7 @@
 ## 给普通用户：从 GitHub 下载 ZIP 并本地安装
 
 1. 打开本仓库 GitHub 页面，点击 `Code` -> `Download ZIP`。
-2. 解压 ZIP 到本地目录，比如 `github-trends-newtab-main/`。
+2. 解压 ZIP 到本地目录，比如 `dtab-bilingual-assistant-main/`。
 3. 在该目录打开终端，执行：
 
 ```bash

@@ -1,14 +1,14 @@
 {
-  "name": "github-trends-newtab",
-  "version": "0.1.2",
-  "description": "Chrome new tab extension for GitHub trends, repo recommendations, and domestic hot searches.",
+  "name": "dtab-bilingual-assistant",
+  "version": "0.1.3",
+  "description": "Chrome extension for developer news, bilingual page translation, and side panel text translation.",
   "private": false,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "sync:vendor": "cp node_modules/@mozilla/readability/Readability.js public/vendor/Readability.js && cp node_modules/turndown/dist/turndown.js public/vendor/turndown.js && cp node_modules/turndown-plugin-gfm/dist/turndown-plugin-gfm.js public/vendor/turndown-plugin-gfm.js",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-content-script.cjs",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1"
   },
