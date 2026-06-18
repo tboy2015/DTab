@@ -42,6 +42,7 @@ describe("translation helpers", () => {
   it("translates repo descriptions and preserves the original", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
+      headers: { get: () => "application/json" },
       json: () => Promise.resolve([[["开发者工具", "Developer tool"]]])
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -54,6 +55,36 @@ describe("translation helpers", () => {
     ]);
 
     vi.unstubAllGlobals();
+  });
+
+  it("falls back when Google returns non-json content", async () => {
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => "text/html" },
+        json: () => Promise.resolve({})
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ responseData: { translatedText: "开发者工具" } })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(translateRepoDescriptions([repo("Developer tool")])).resolves.toMatchObject([
+      {
+        description: "开发者工具",
+        originalDescription: "Developer tool"
+      }
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("api.mymemory.translated.net");
+
+    vi.unstubAllGlobals();
+    warnMock.mockRestore();
   });
 
   it("clears cached broken template descriptions", async () => {

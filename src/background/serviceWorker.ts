@@ -1,7 +1,7 @@
 import { clipTabToMarkdown } from "../lib/clip/clip";
 import { refreshDashboard } from "../lib/refresh";
 import { readDashboardStorage } from "../lib/storage";
-import { translateTextToChinese } from "../lib/translation";
+import { translateTextsToChinese } from "../lib/translation";
 import {
   SIDE_PANEL_PENDING_TRANSLATION_KEY,
   type AppStorage,
@@ -19,7 +19,6 @@ const RETRANSLATE_MENU_ID = "retranslate-page-to-chinese";
 const TRANSLATE_SELECTION_MENU_ID = "translate-selection-to-chinese";
 const SIDEPANEL_MENU_ID = "open-translate-sidepanel";
 const TRANSLATE_BATCH_LIMIT = 160;
-const TRANSLATE_CONCURRENCY = 4;
 
 /** 注册右键菜单入口 */
 function createClipMenu() {
@@ -105,7 +104,6 @@ async function openTranslateSidePanel(tab: chrome.tabs.Tab | undefined): Promise
     throw new Error("当前 Chrome 不支持侧边栏，或没有可用标签页");
   }
 
-  await prepareTranslateSidePanel(tabId);
   await chrome.sidePanel.open({ tabId });
 }
 
@@ -183,25 +181,13 @@ async function translateTexts(
   targetLanguage: TranslationTargetLanguage = "zh-CN"
 ): Promise<string[]> {
   const limitedTexts = texts.slice(0, TRANSLATE_BATCH_LIMIT);
-  const results = new Array<string>(limitedTexts.length).fill("");
-  let nextIndex = 0;
 
-  async function worker() {
-    while (nextIndex < limitedTexts.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-
-      try {
-        results[index] = await translateTextToChinese(limitedTexts[index], targetLanguage);
-      } catch (error) {
-        console.warn("[translate] 文本翻译失败:", error instanceof Error ? error.message : error);
-      }
-    }
+  try {
+    return await translateTextsToChinese(limitedTexts, targetLanguage);
+  } catch (error) {
+    console.warn("[translate] 批量文本翻译失败:", error instanceof Error ? error.message : error);
+    return new Array<string>(limitedTexts.length).fill("");
   }
-
-  await Promise.all(Array.from({ length: TRANSLATE_CONCURRENCY }, worker));
-
-  return results;
 }
 
 chrome.runtime.onInstalled.addListener(() => {

@@ -5,6 +5,11 @@ const TRANSLATION_CLASS = "dtab-inline-translation";
 const TRANSLATION_STYLE_ID = "dtab-inline-translation-style";
 const STORAGE_KEY = "dtab.translateFloatingButton";
 const TRANSLATION_PREFERENCES_KEY = "dtab.translation.preferences";
+const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const MYMEMORY_ENDPOINT = "https://api.mymemory.translated.net/get";
+const TRANSLATE_REQUEST_TIMEOUT_MS = 10000;
+const RUNTIME_MESSAGE_TIMEOUT_MS = 12000;
+const BATCH_SEPARATOR = "\n\n<<<DTAB_TRANSLATION_SEGMENT>>>\n\n";
 const DEFAULT_TRANSLATION_PREFERENCES: TranslationPreferences = {
   selectionBubbleEnabled: true,
   autoTranslateSelection: false,
@@ -18,6 +23,9 @@ const MIN_TEXT_LENGTH = 2;
 const EDGE_PEEK = 18;
 const BUTTON_SIZE = 46;
 const SIDEPANEL_BUTTON_SIZE = 34;
+const TOOL_BUTTON_OFFSET = 32;
+const TOOL_HOVER_HITBOX_WIDTH = 76;
+const TOOL_HOVER_HITBOX_PADDING = 14;
 const SELECTION_BUBBLE_WIDTH = 280;
 const CHINESE_TEXT_PATTERN = /[\u3400-\u9fff]/;
 const LATIN_TEXT_PATTERN = /[A-Za-z]/;
@@ -95,8 +103,192 @@ function canUseExtensionRuntime(): boolean {
   return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
 }
 
+function getExtensionRuntime(): typeof chrome.runtime {
+  if (!canUseExtensionRuntime() || !chrome.runtime?.sendMessage) {
+    throw new Error("扩展运行环境不可用，请重新加载扩展和当前页面");
+  }
+
+  return chrome.runtime;
+}
+
 function sendRuntimeMessage(message: RuntimeMessage): Promise<RuntimeResponse<string[]>> {
-  return chrome.runtime.sendMessage(message);
+  return getExtensionRuntime().sendMessage(message);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  });
+}
+
+function readTranslatedText(payload: unknown): string {
+  if (!Array.isArray(payload) || !Array.isArray(payload[0])) {
+    return "";
+  }
+
+  return payload[0]
+    .map((segment) => (Array.isArray(segment) && typeof segment[0] === "string" ? segment[0] : ""))
+    .join("")
+    .trim();
+}
+
+function readMyMemoryTranslatedText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const responseData = (payload as { responseData?: unknown }).responseData;
+
+  if (!responseData || typeof responseData !== "object") {
+    return "";
+  }
+
+  const translatedText = (responseData as { translatedText?: unknown }).translatedText;
+  const responseStatus = (payload as { responseStatus?: unknown }).responseStatus;
+
+  if (responseStatus === 429) {
+    throw new Error("备用翻译接口额度已用完");
+  }
+
+  if (typeof translatedText !== "string") {
+    return "";
+  }
+
+  if (/MYMEMORY WARNING|USAGELIMITS/i.test(translatedText)) {
+    throw new Error("备用翻译接口额度已用完");
+  }
+
+  return translatedText.trim();
+}
+
+async function fetchJsonWithTimeout(url: string): Promise<unknown> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), TRANSLATE_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`翻译请求失败：${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (!contentType.toLowerCase().includes("json")) {
+      throw new Error("翻译接口返回了非 JSON 内容");
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("翻译请求超时");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function translateWithGoogle(text: string): Promise<string> {
+  const params = new URLSearchParams({
+    client: "gtx",
+    sl: "auto",
+    tl: preferences.targetLanguage,
+    dt: "t",
+    q: text
+  });
+
+  return readTranslatedText(await fetchJsonWithTimeout(`${TRANSLATE_ENDPOINT}?${params.toString()}`));
+}
+
+async function translateWithMyMemory(text: string): Promise<string> {
+  const params = new URLSearchParams({
+    q: text,
+    langpair: `en|${preferences.targetLanguage}`
+  });
+
+  return readMyMemoryTranslatedText(await fetchJsonWithTimeout(`${MYMEMORY_ENDPOINT}?${params.toString()}`));
+}
+
+async function translateTextDirectly(text: string): Promise<string> {
+  try {
+    const translated = await translateWithGoogle(text);
+
+    if (translated) {
+      return translated;
+    }
+  } catch (error) {
+    console.warn("[translate] Google 翻译不可用，改用备用接口:", error);
+  }
+
+  return translateWithMyMemory(text);
+}
+
+function splitBatchTranslation(translated: string, expectedCount: number): string[] {
+  const parts = translated
+    .split("<<<DTAB_TRANSLATION_SEGMENT>>>")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts.length === expectedCount ? parts : [];
+}
+
+async function translateTextsDirectly(texts: string[]): Promise<string[]> {
+  if (texts.length === 0) {
+    return [];
+  }
+
+  if (texts.length === 1) {
+    return [await translateTextDirectly(texts[0])];
+  }
+
+  const batchedText = texts.join(BATCH_SEPARATOR);
+
+  try {
+    const translated = await translateTextDirectly(batchedText);
+    const parts = splitBatchTranslation(translated, texts.length);
+
+    if (parts.length === texts.length) {
+      return parts;
+    }
+  } catch (error) {
+    console.warn("[translate] 内容脚本批量直连失败，改用逐条直连:", error);
+  }
+
+  return Promise.all(texts.map((text) => translateTextDirectly(text)));
+}
+
+async function requestTranslations(texts: string[]): Promise<string[]> {
+  try {
+    const response = await withTimeout(
+      sendRuntimeMessage({
+        type: "TRANSLATE_TEXTS",
+        texts,
+        targetLanguage: preferences.targetLanguage
+      }),
+      RUNTIME_MESSAGE_TIMEOUT_MS,
+      "后台翻译请求超时"
+    );
+
+    if (!response.ok || !Array.isArray(response.data)) {
+      throw new Error(response.error ?? "翻译失败");
+    }
+
+    return response.data;
+  } catch (error) {
+    console.warn("[translate] 后台翻译不可用，改用内容脚本直连:", error);
+    return translateTextsDirectly(texts);
+  }
 }
 
 function mergePreferences(value: unknown): TranslationPreferences {
@@ -173,10 +365,21 @@ function hasOnlyLinkLikeText(container: HTMLElement, text: string): boolean {
   return linkText.length > 0 && linkText.length >= text.length * 0.72;
 }
 
+function isCompactInlineText(container: HTMLElement, original: string): boolean {
+  const words = wordCount(original);
+  const rect = container.getBoundingClientRect();
+
+  return (words <= 6 && original.length <= 80) || (rect.height <= 44 && original.length <= 90);
+}
+
 function inferInsertStrategy(container: HTMLElement, original: string): TranslationInsertStrategy {
   const tagName = container.tagName;
   const words = wordCount(original);
   const rect = container.getBoundingClientRect();
+
+  if (/^H[1-6]$/.test(tagName) && isLikelySidebar(container) && isCompactInlineText(container, original)) {
+    return "inline-ui";
+  }
 
   if (/^H[1-6]$/.test(tagName)) {
     return "heading";
@@ -194,6 +397,10 @@ function inferInsertStrategy(container: HTMLElement, original: string): Translat
     return "inline-ui";
   }
 
+  if (isLikelySidebar(container) && isCompactInlineText(container, original)) {
+    return "inline-ui";
+  }
+
   if (isLikelySidebar(container) && original.length <= 180) {
     return "side-card";
   }
@@ -205,7 +412,7 @@ function inferInsertStrategy(container: HTMLElement, original: string): Translat
     return words <= 18 ? "list-card" : "paragraph";
   }
 
-  if (words <= 3 && original.length <= 32) {
+  if (isCompactInlineText(container, original) || (words <= 3 && original.length <= 32)) {
     return "inline-ui";
   }
 
@@ -375,22 +582,87 @@ function collectTextBlocks(): TextBlock[] {
     .slice(0, MAX_TEXT_NODES);
 }
 
+function isBlockReadyForTranslation(block: TextBlock): boolean {
+  return (
+    !translatedContainers.has(block.container) &&
+    !processingContainers.has(block.container) &&
+    !loadingPlaceholders.has(block.container)
+  );
+}
+
+function isElementNearViewport(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.bottom >= -VIEWPORT_TRANSLATE_MARGIN &&
+    rect.top <= window.innerHeight + VIEWPORT_TRANSLATE_MARGIN
+  );
+}
+
+function isElementInViewport(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+
+  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+}
+
+function viewportDistance(element: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+
+  if (rect.bottom < 0) {
+    return Math.abs(rect.bottom);
+  }
+
+  if (rect.top > window.innerHeight) {
+    return rect.top - window.innerHeight;
+  }
+
+  return 0;
+}
+
+function compareBlockViewportPriority(first: TextBlock, second: TextBlock): number {
+  const firstInViewport = isElementInViewport(first.container);
+  const secondInViewport = isElementInViewport(second.container);
+
+  if (firstInViewport !== secondInViewport) {
+    return firstInViewport ? -1 : 1;
+  }
+
+  const firstDistance = viewportDistance(first.container);
+  const secondDistance = viewportDistance(second.container);
+
+  if (firstDistance !== secondDistance) {
+    return firstDistance - secondDistance;
+  }
+
+  return first.container.getBoundingClientRect().top - second.container.getBoundingClientRect().top;
+}
+
 function collectPendingVisibleBlocks(): TextBlock[] {
-  const blocks: TextBlock[] = [];
+  const blocks = new Map<HTMLElement, TextBlock>();
 
   pendingIntersectionContainers.forEach((container) => {
     const block = observedContainers.get(container);
 
-    if (
-      block &&
-      !translatedContainers.has(container) &&
-      !processingContainers.has(container)
-    ) {
-      blocks.push(block);
+    if (block && isBlockReadyForTranslation(block)) {
+      blocks.set(container, block);
     }
   });
 
-  return blocks;
+  collectTextBlocks().forEach((block) => {
+    if (
+      !isBlockReadyForTranslation(block) ||
+      !isElementNearViewport(block.container) ||
+      blocks.has(block.container)
+    ) {
+      return;
+    }
+
+    blocks.set(block.container, block);
+  });
+
+  return Array.from(blocks.values()).sort(compareBlockViewportPriority);
 }
 
 async function readPosition(): Promise<void> {
@@ -430,6 +702,19 @@ function applyPosition(button: HTMLButtonElement): void {
   button.style.right = position.edge === "right" ? `${-EDGE_PEEK}px` : "";
 }
 
+function applyHostHoverArea(host: HTMLElement): void {
+  const clusterTop = clamp(
+    position.y - TOOL_BUTTON_OFFSET - TOOL_HOVER_HITBOX_PADDING,
+    0,
+    window.innerHeight - BUTTON_SIZE - TOOL_BUTTON_OFFSET - TOOL_HOVER_HITBOX_PADDING * 2
+  );
+  const clusterHeight = BUTTON_SIZE + TOOL_BUTTON_OFFSET * 2 + TOOL_HOVER_HITBOX_PADDING * 2;
+
+  host.dataset.edge = position.edge;
+  host.style.setProperty("--cluster-top", `${clusterTop}px`);
+  host.style.setProperty("--cluster-height", `${clusterHeight}px`);
+}
+
 function applyToolButtonPosition(button: HTMLButtonElement, offsetY: number): void {
   const top = clamp(position.y + offsetY, 14, window.innerHeight - SIDEPANEL_BUTTON_SIZE - 14);
 
@@ -454,11 +739,6 @@ async function openTranslateSidePanel(): Promise<void> {
     }
   } catch (error) {
     console.warn("[translate] 打开翻译侧边栏失败:", error);
-    window.open(
-      chrome.runtime.getURL("sidepanel.html"),
-      "dtab-translate-sidepanel",
-      "popup,width=420,height=760"
-    );
   }
 }
 
@@ -623,7 +903,7 @@ function showSelectionBubble(): void {
 async function translateSelection(): Promise<void> {
   const text = (selectionBubble?.dataset.selectedText || selectedText).trim();
 
-  if (!text || !selectionBubble || !canUseExtensionRuntime()) {
+  if (!text || !selectionBubble) {
     return;
   }
 
@@ -640,21 +920,13 @@ async function translateSelection(): Promise<void> {
       return;
     }
 
-    const response = await sendRuntimeMessage({
-      type: "TRANSLATE_TEXTS",
-      texts: [text],
-      targetLanguage: preferences.targetLanguage
-    });
+    const translations = await requestTranslations([text]);
 
     if (selectionRequestId !== requestId) {
       return;
     }
 
-    if (!response.ok || !Array.isArray(response.data)) {
-      throw new Error(response.error ?? "翻译失败");
-    }
-
-    const translated = response.data[0]?.trim();
+    const translated = translations[0]?.trim();
 
     if (!translated) {
       throw new Error("没有获取到译文");
@@ -1030,11 +1302,6 @@ async function translatePage(button: HTMLButtonElement): Promise<void> {
     return;
   }
 
-  if (!canUseExtensionRuntime()) {
-    setStatus(button, "error");
-    return;
-  }
-
   isTranslated = true;
   startAutoTranslateObservers();
   observePendingTextBlocks();
@@ -1070,25 +1337,21 @@ async function translateVisiblePageBlocks(button: HTMLButtonElement): Promise<vo
 
   try {
     if (uniqueTexts.length > 0) {
-      const response = await sendRuntimeMessage({
-        type: "TRANSLATE_TEXTS",
-        texts: uniqueTexts,
-        targetLanguage: preferences.targetLanguage
-      });
-
-      if (!response.ok || !Array.isArray(response.data)) {
-        throw new Error(response.error ?? "翻译失败");
-      }
-
-      const translations = response.data;
+      const translations = await requestTranslations(uniqueTexts);
+      let acceptedTranslations = 0;
 
       uniqueTexts.forEach((text, index) => {
         const translated = translations[index];
 
         if (typeof translated === "string" && translated.trim() && translated !== text) {
           translationCache.set(translationCacheKey(text), translated);
+          acceptedTranslations += 1;
         }
       });
+
+      if (acceptedTranslations === 0) {
+        throw new Error("没有获取到可用译文");
+      }
     }
 
     if (!isTranslated || generation !== pageTranslationGeneration) {
@@ -1102,7 +1365,6 @@ async function translateVisiblePageBlocks(button: HTMLButtonElement): Promise<vo
 
       if (!translated || translated === block.original) {
         removeLoadingPlaceholder(block);
-        translatedContainers.add(block.container);
         return;
       }
 
@@ -1202,6 +1464,23 @@ function createFloatingButton(): HTMLButtonElement {
     :host {
       all: initial;
       color-scheme: light;
+      display: block;
+      height: var(--cluster-height, 138px);
+      position: fixed;
+      top: var(--cluster-top, 40vh);
+      width: ${TOOL_HOVER_HITBOX_WIDTH}px;
+      z-index: 2147483647;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :host([data-edge="left"]) {
+      left: 0;
+      right: auto;
+    }
+
+    :host([data-edge="right"]) {
+      left: auto;
+      right: 0;
     }
 
     .floating-button {
@@ -1313,6 +1592,7 @@ function createFloatingButton(): HTMLButtonElement {
     }
 
     :host(:hover) .tool-button,
+    :host(:focus-within) .tool-button,
     .tool-button:focus-visible {
       opacity: 1;
       pointer-events: auto;
@@ -1656,12 +1936,16 @@ function renderPosition(button: HTMLButtonElement, tip?: HTMLElement): void {
   button.dataset.edge = position.edge;
   button.style.setProperty("--button-top", `${position.y}px`);
 
+  if (root instanceof ShadowRoot && root.host instanceof HTMLElement) {
+    applyHostHoverArea(root.host);
+  }
+
   if (sidePanelButton) {
-    applyToolButtonPosition(sidePanelButton, -42);
+    applyToolButtonPosition(sidePanelButton, -TOOL_BUTTON_OFFSET);
   }
 
   if (closeButton) {
-    applyToolButtonPosition(closeButton, 42);
+    applyToolButtonPosition(closeButton, TOOL_BUTTON_OFFSET);
   }
 
   if (label) {
