@@ -1,4 +1,4 @@
-export const REBANG_URL = "https://rebang.open2hub.com/";
+export const REBANG_URL = "https://top.open2hub.com/";
 
 export const HOT_CATEGORY_LABELS = ["全部", "综合", "新闻", "财经", "娱乐", "科技"] as const;
 
@@ -34,6 +34,14 @@ const SOURCE_PRIORITY = [
   "36氪"
 ];
 
+const REBANG_CHANNELS: Array<{ category: Exclude<HotCategory, "全部">; path: string }> = [
+  { category: "综合", path: "channel/all" },
+  { category: "新闻", path: "channel/news" },
+  { category: "财经", path: "channel/finance" },
+  { category: "娱乐", path: "channel/ent" },
+  { category: "科技", path: "channel/tech" }
+];
+
 function textContent(element: Element | null): string {
   return element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 }
@@ -63,17 +71,73 @@ function sortSources(sources: HotSource[]): HotSource[] {
   });
 }
 
+function boardName(updatedAt: string): string {
+  return updatedAt.split(" - ").pop()?.trim() ?? "";
+}
+
+function boardScore(source: HotSource): number {
+  const board = boardName(source.updatedAt);
+
+  if (/综合热门|热搜|热榜|热点|热门/.test(board)) {
+    return 0;
+  }
+
+  if (board.includes(source.category)) {
+    return 1;
+  }
+
+  if (/必看|必刷|榜/.test(board)) {
+    return 2;
+  }
+
+  return 3;
+}
+
+function dedupeSourcesByPlatform(sources: HotSource[]): HotSource[] {
+  const byPlatform = new Map<string, HotSource>();
+
+  for (const source of sources) {
+    const key = `${source.category}\n${source.name}`;
+    const current = byPlatform.get(key);
+
+    if (!current || boardScore(source) < boardScore(current)) {
+      byPlatform.set(key, source);
+    }
+  }
+
+  return Array.from(byPlatform.values());
+}
+
+function uniqueSources(sources: HotSource[]): HotSource[] {
+  const seen = new Map<string, number>();
+
+  return sources.map((source) => {
+    const count = seen.get(source.id) ?? 0;
+    seen.set(source.id, count + 1);
+
+    if (count === 0) {
+      return source;
+    }
+
+    return {
+      ...source,
+      id: `${source.id}-${count + 1}`
+    };
+  });
+}
+
 export function parseRebangHtml(html: string): HotSource[] {
   const document = new DOMParser().parseFromString(html, "text/html");
-  const cards = Array.from(document.querySelectorAll("section.card"));
+  const cards = Array.from(document.querySelectorAll("section.card, [role='listitem'][data-filter] .card-rebang"));
 
-  return sortSources(
+  return uniqueSources(dedupeSourcesByPlatform(sortSources(
     cards
       .map((card): HotSource | null => {
-        const name = textContent(card.querySelector(".platform-name-span, .header-content h3"));
+        const categoryElement = card.matches("[data-filter]") ? card : card.closest("[data-filter]");
+        const name = textContent(card.querySelector(".platform-name-span, .header-content h3, .platform-title"));
         const iconUrl = card.querySelector<HTMLImageElement>(".platform-icon img, .icon-square img")?.src;
-        const footer = textContent(card.querySelector(".update-footer, .header-content p"));
-        const items = Array.from(card.querySelectorAll<HTMLAnchorElement>(".list-item"))
+        const footer = textContent(card.querySelector(".update-footer, .header-content p, .platform-time"));
+        const items = Array.from(card.querySelectorAll<HTMLAnchorElement>(".list-item, .list-item-link"))
           .slice(0, 10)
           .map((item, index) => ({
             rank: Number(item.dataset.rank) || Number(textContent(item.querySelector(".list-number"))) || index + 1,
@@ -86,10 +150,11 @@ export function parseRebangHtml(html: string): HotSource[] {
           return null;
         }
 
+        const category = normalizeCategory(categoryElement?.getAttribute("data-filter") ?? null);
         const source: HotSource = {
-          id: sourceId(name),
+          id: sourceId(`${category}-${name}`),
           name,
-          category: normalizeCategory(card.getAttribute("data-filter")),
+          category,
           updatedAt: footer,
           items
         };
@@ -101,25 +166,36 @@ export function parseRebangHtml(html: string): HotSource[] {
         return source;
       })
       .filter((source): source is HotSource => source !== null)
-  );
+  )));
 }
 
-export function getRebangFetchUrl(): string {
+export function getRebangFetchUrl(path = ""): string {
   if (typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)) {
-    return "/hot-proxy/rebang";
+    return `/hot-proxy/rebang/${path}`.replace(/\/$/, "");
   }
 
-  return REBANG_URL;
+  return new URL(path, REBANG_URL).toString();
 }
 
 export async function fetchDomesticHotSources(fetchUrl = getRebangFetchUrl()): Promise<HotSource[]> {
-  const response = await fetch(fetchUrl, { cache: "no-store" });
+  const fetchChannel = async (url: string) => {
+    const response = await fetch(url, { cache: "no-store" });
 
-  if (!response.ok) {
-    throw new Error(`热搜读取失败：${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`热搜读取失败：${response.status}`);
+    }
 
-  const sources = parseRebangHtml(await response.text());
+    return parseRebangHtml(await response.text());
+  };
+
+  const sourceGroups =
+    fetchUrl === getRebangFetchUrl()
+      ? (await Promise.allSettled(REBANG_CHANNELS.map((channel) => fetchChannel(getRebangFetchUrl(channel.path)))))
+          .filter((result): result is PromiseFulfilledResult<HotSource[]> => result.status === "fulfilled")
+          .map((result) => result.value)
+      : [await fetchChannel(fetchUrl)];
+
+  const sources = uniqueSources(sourceGroups.flat());
 
   if (sources.length === 0) {
     throw new Error("热搜数据为空");

@@ -6,9 +6,9 @@ export default defineConfig({
   server: {
     proxy: {
       "/hot-proxy/rebang": {
-        target: "https://rebang.open2hub.com",
+        target: "https://top.open2hub.com",
         changeOrigin: true,
-        rewrite: () => "/"
+        rewrite: (path) => path.replace(/^\/hot-proxy\/rebang\/?/, "/") || "/"
       }
     }
   },
@@ -35,7 +35,7 @@ export default defineConfig({
     }
   },
   test: {
-    environment: "node",
+    environment: "happy-dom",
     include: ["src/**/*.test.ts"]
   }
 });

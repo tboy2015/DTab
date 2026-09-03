@@ -27,6 +27,7 @@
     "@types/chrome": "^0.0.320",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "happy-dom": "^20.13.2",
     "vitest": "^3.0.0"
   }
 }

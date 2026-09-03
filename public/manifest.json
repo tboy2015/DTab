@@ -8,6 +8,7 @@
     "https://github.com/*",
     "https://api.github.com/*",
     "https://rebang.open2hub.com/*",
+    "https://top.open2hub.com/*",
     "https://translate.googleapis.com/*",
     "https://api.mymemory.translated.net/*"
   ],

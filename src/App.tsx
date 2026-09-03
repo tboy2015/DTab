@@ -649,7 +649,9 @@ function HotTrendsPanel({
           ...(featuredSources.length > 0 ? [{ category: "推荐", sources: featuredSources }] : []),
           ...categorySections
         ]
-      : [{ category: activeCategory, sources: filteredSources }];
+      : filteredSources.length > 0
+        ? [{ category: activeCategory, sources: filteredSources }]
+        : [];
 
   if (variant === "wide") {
     return (
@@ -678,20 +680,22 @@ function HotTrendsPanel({
           </div>
         ) : (
           <>
-            <section className="hot-source-gallery" aria-label="热门平台">
-              <div className="hot-section-title">热门</div>
-              <div className="hot-source-rail">
-                {filteredSources.slice(0, 18).map((source) => (
-                  <a href={source.items[0]?.url ?? "#"} key={source.id} rel="noreferrer" target="_blank">
-                    <span className="hot-source-logo">
-                      {source.iconUrl ? <img alt="" src={source.iconUrl} /> : <Newspaper size={24} />}
-                    </span>
-                    <strong>{source.name}</strong>
-                    <small>{source.category}</small>
-                  </a>
-                ))}
-              </div>
-            </section>
+            {filteredSources.length > 0 && (
+              <section className="hot-source-gallery" aria-label="热门平台">
+                <div className="hot-section-title">热门</div>
+                <div className="hot-source-rail">
+                  {filteredSources.slice(0, 18).map((source) => (
+                    <a href={source.items[0]?.url ?? "#"} key={source.id} rel="noreferrer" target="_blank">
+                      <span className="hot-source-logo">
+                        {source.iconUrl ? <img alt="" src={source.iconUrl} /> : <Newspaper size={24} />}
+                      </span>
+                      <strong>{source.name}</strong>
+                      <small>{source.category}</small>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {boardSections.map((section) => (
               <section className="hot-board-section" key={section.category}>
