@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DTab 双语助手",
   "description": "在 Chrome 新标签页查看开发资讯，并提供网页翻译、双语对照和侧边栏文本翻译。",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "permissions": ["alarms", "storage", "activeTab", "scripting", "contextMenus", "downloads", "sidePanel"],
   "host_permissions": [
     "https://github.com/*",
@@ -10,6 +10,7 @@
     "https://rebang.open2hub.com/*",
     "https://top.open2hub.com/*",
     "https://translate.googleapis.com/*",
+    "https://translate.google.com/*",
     "https://api.mymemory.translated.net/*"
   ],
   "action": {

@@ -39,6 +39,10 @@ describe("translation helpers", () => {
     ).toBe("一个工具");
   });
 
+  it("decodes text returned by the Google mobile page", () => {
+    expect(translationInternals.decodeHtmlEntities("你好 &amp; &#x4E16;&#30028;")).toBe("你好 & 世界");
+  });
+
   it("translates repo descriptions and preserves the original", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -57,7 +61,7 @@ describe("translation helpers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("falls back when Google returns non-json content", async () => {
+  it("falls back to the Google mobile page when the JSON endpoint is blocked", async () => {
     const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi
       .fn()
@@ -68,8 +72,8 @@ describe("translation helpers", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ responseData: { translatedText: "开发者工具" } })
+        text: () =>
+          Promise.resolve('<div class="result-container">&#24320;&#21457;&#32773;&#24037;&#20855;</div>')
       });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -81,7 +85,7 @@ describe("translation helpers", () => {
     ]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1][0])).toContain("api.mymemory.translated.net");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("translate.google.com/m");
 
     vi.unstubAllGlobals();
     warnMock.mockRestore();

@@ -181,13 +181,7 @@ async function translateTexts(
   targetLanguage: TranslationTargetLanguage = "zh-CN"
 ): Promise<string[]> {
   const limitedTexts = texts.slice(0, TRANSLATE_BATCH_LIMIT);
-
-  try {
-    return await translateTextsToChinese(limitedTexts, targetLanguage);
-  } catch (error) {
-    console.warn("[translate] 批量文本翻译失败:", error instanceof Error ? error.message : error);
-    return new Array<string>(limitedTexts.length).fill("");
-  }
+  return translateTextsToChinese(limitedTexts, targetLanguage);
 }
 
 chrome.runtime.onInstalled.addListener(() => {

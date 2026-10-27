@@ -126,15 +126,22 @@ function uniqueSources(sources: HotSource[]): HotSource[] {
   });
 }
 
-export function parseRebangHtml(html: string): HotSource[] {
+export function parseRebangHtml(html: string, defaultCategory?: HotSource["category"]): HotSource[] {
   const document = new DOMParser().parseFromString(html, "text/html");
-  const cards = Array.from(document.querySelectorAll("section.card, [role='listitem'][data-filter] .card-rebang"));
+  const cards = Array.from(
+    document.querySelectorAll("section.card, [role='listitem'][data-filter] .card-rebang, .card-rebang[role='listitem']")
+  );
 
   return uniqueSources(dedupeSourcesByPlatform(sortSources(
     cards
       .map((card): HotSource | null => {
         const categoryElement = card.matches("[data-filter]") ? card : card.closest("[data-filter]");
-        const name = textContent(card.querySelector(".platform-name-span, .header-content h3, .platform-title"));
+        const name = textContent(
+          card.querySelector(".platform-name-span")
+            ?? card.querySelector(".header-content h3")
+            ?? card.querySelector(".platform-title-link span:not(.sr-only)")
+            ?? card.querySelector(".platform-title")
+        );
         const iconUrl = card.querySelector<HTMLImageElement>(".platform-icon img, .icon-square img")?.src;
         const footer = textContent(card.querySelector(".update-footer, .header-content p, .platform-time"));
         const items = Array.from(card.querySelectorAll<HTMLAnchorElement>(".list-item, .list-item-link"))
@@ -150,7 +157,9 @@ export function parseRebangHtml(html: string): HotSource[] {
           return null;
         }
 
-        const category = normalizeCategory(categoryElement?.getAttribute("data-filter") ?? null);
+        const category = categoryElement?.getAttribute("data-filter")
+          ? normalizeCategory(categoryElement.getAttribute("data-filter"))
+          : defaultCategory ?? "综合";
         const source: HotSource = {
           id: sourceId(`${category}-${name}`),
           name,
@@ -178,19 +187,21 @@ export function getRebangFetchUrl(path = ""): string {
 }
 
 export async function fetchDomesticHotSources(fetchUrl = getRebangFetchUrl()): Promise<HotSource[]> {
-  const fetchChannel = async (url: string) => {
+  const fetchChannel = async (url: string, category?: HotSource["category"]) => {
     const response = await fetch(url, { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(`热搜读取失败：${response.status}`);
     }
 
-    return parseRebangHtml(await response.text());
+    return parseRebangHtml(await response.text(), category);
   };
 
   const sourceGroups =
     fetchUrl === getRebangFetchUrl()
-      ? (await Promise.allSettled(REBANG_CHANNELS.map((channel) => fetchChannel(getRebangFetchUrl(channel.path)))))
+      ? (await Promise.allSettled(
+          REBANG_CHANNELS.map((channel) => fetchChannel(getRebangFetchUrl(channel.path), channel.category))
+        ))
           .filter((result): result is PromiseFulfilledResult<HotSource[]> => result.status === "fulfilled")
           .map((result) => result.value)
       : [await fetchChannel(fetchUrl)];

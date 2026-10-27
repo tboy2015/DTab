@@ -6,12 +6,9 @@ const TRENDING_PERIOD: Record<TrendRange, string> = {
   monthly: "monthly"
 };
 
-const CATEGORY_QUERIES: Record<RecommendationCategory, string> = {
-  ai: "AI OR artificial-intelligence OR machine-learning in:name,description,topics",
-  chatgpt: "ChatGPT OR GPT OR LLM in:name,description,topics",
-  algorithm: "algorithm OR data-structures OR leetcode in:name,description,topics",
-  tools: "developer-tools OR productivity OR cli in:name,description,topics"
-};
+const API_POOL_MAX_AGE = 1000 * 60 * 5;
+let trendingFallbackPool: { fetchedAt: number; promise: Promise<RepoItem[]> } | undefined;
+let recommendationPool: { fetchedAt: number; promise: Promise<RepoItem[]> } | undefined;
 
 export function parseCompactNumber(value: string): number {
   const cleaned = value.replace(/,/g, "").trim().toLowerCase();
@@ -167,17 +164,49 @@ export function parseTrendingHtml(html: string, fetchedAt = new Date().toISOStri
 }
 
 export async function fetchTrending(range: TrendRange): Promise<RepoItem[]> {
-  const response = await fetch(`https://github.com/trending?since=${TRENDING_PERIOD[range]}`, {
-    headers: {
-      Accept: "text/html"
-    }
-  });
+  try {
+    const response = await fetch(`https://github.com/trending?since=${TRENDING_PERIOD[range]}`, {
+      headers: { Accept: "text/html" }
+    });
+    const repos = response.ok
+      ? parseTrendingHtml(await response.text()).slice(0, range === "monthly" ? 30 : 25)
+      : [];
 
-  if (!response.ok) {
-    throw new Error(`GitHub Trending 请求失败：${response.status}`);
+    if (repos.length > 0) {
+      return repos;
+    }
+  } catch {
+    // GitHub 的 HTML 页面偶尔会被浏览器网络策略拦截，继续使用 API 降级源。
   }
 
-  return parseTrendingHtml(await response.text()).slice(0, range === "monthly" ? 30 : 25);
+  return fetchTrendingFallback(range);
+}
+
+async function fetchTrendingFallback(range: TrendRange): Promise<RepoItem[]> {
+  const now = Date.now();
+
+  if (!trendingFallbackPool || now - trendingFallbackPool.fetchedAt >= API_POOL_MAX_AGE) {
+    const since = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const query = encodeURIComponent(`pushed:>=${since} stars:>100`);
+    const promise = fetch(
+      `https://api.github.com/search/repositories?q=${query}&sort=stars&order=desc&per_page=30`,
+      { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }
+    ).then(async (response) => {
+      if (!response.ok) throw new Error(`GitHub 趋势降级请求失败：${response.status}`);
+      return normalizeSearchResponse(await response.json()).map((repo) => ({ ...repo, source: "trending" as const }));
+    });
+    trendingFallbackPool = { fetchedAt: now, promise };
+    void promise.catch(() => { trendingFallbackPool = undefined; });
+  }
+
+  const repos = (await trendingFallbackPool.promise).slice(0, range === "monthly" ? 30 : 25);
+
+  if (repos.length === 0) {
+    trendingFallbackPool = undefined;
+    throw new Error("GitHub 趋势数据为空，已保留原有缓存");
+  }
+
+  return repos;
 }
 
 function needsDescriptionBackfill(repo: RepoItem): boolean {
@@ -217,22 +246,38 @@ export function normalizeSearchResponse(payload: SearchResponse, fetchedAt = new
 }
 
 export async function fetchRecommendations(category: RecommendationCategory): Promise<RepoItem[]> {
-  const query = encodeURIComponent(`${CATEGORY_QUERIES[category]} stars:>500 pushed:>2025-01-01`);
-  const response = await fetch(
-    `https://api.github.com/search/repositories?q=${query}&sort=stars&order=desc&per_page=12`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-      }
-    }
-  );
+  const now = Date.now();
 
-  if (!response.ok) {
-    throw new Error(`GitHub Search 请求失败：${response.status}`);
+  if (!recommendationPool || now - recommendationPool.fetchedAt >= API_POOL_MAX_AGE) {
+    const query = encodeURIComponent("AI OR GPT OR algorithm OR developer-tools in:name,description,topics stars:>500 pushed:>2025-01-01");
+    const promise = fetch(
+      `https://api.github.com/search/repositories?q=${query}&sort=stars&order=desc&per_page=50`,
+      { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }
+    ).then(async (response) => {
+      if (!response.ok) throw new Error(`GitHub Search 请求失败：${response.status}`);
+      return normalizeSearchResponse(await response.json());
+    });
+    recommendationPool = { fetchedAt: now, promise };
+    void promise.catch(() => { recommendationPool = undefined; });
   }
 
-  return normalizeSearchResponse(await response.json());
+  const repos = await recommendationPool.promise;
+  const categoryPattern: Record<RecommendationCategory, RegExp> = {
+    ai: /\b(ai|artificial intelligence|machine learning|agent)\b/i,
+    chatgpt: /\b(chatgpt|gpt|llm|language model)\b/i,
+    algorithm: /\b(algorithm|data structure|leetcode|interview)\b/i,
+    tools: /\b(tool|productivity|cli|developer|automation)\b/i
+  };
+  const matches = repos.filter((repo) => categoryPattern[category].test(
+    `${repo.fullName} ${repo.description} ${repo.topics.join(" ")}`
+  ));
+
+  return uniqueByFullName([...matches, ...repos]).slice(0, 12);
+}
+
+function uniqueByFullName(repos: RepoItem[]): RepoItem[] {
+  const seen = new Set<string>();
+  return repos.filter((repo) => !seen.has(repo.fullName) && Boolean(seen.add(repo.fullName)));
 }
 
 export async function backfillRepoDescriptions(repos: RepoItem[]): Promise<RepoItem[]> {

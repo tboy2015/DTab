@@ -119,6 +119,26 @@ describe("parseRebangHtml", () => {
     });
   });
 
+  it("parses the live channel markup without data-filter", () => {
+    const sources = parseRebangHtml(`
+      <div class="card-rebang" role="listitem">
+        <h2 class="platform-title">
+          <a class="platform-title-link"><span>IT之家</span><span class="sr-only">（在新窗口打开）</span></a>
+        </h2>
+        <p class="platform-time">十分钟内更新 - 热榜</p>
+        <a class="list-item-link" href="https://example.com/one">
+          <span class="list-number">1</span><span class="list-text">科技新闻</span>
+        </a>
+      </div>
+    `, "科技");
+
+    expect(sources).toMatchObject([{
+      name: "IT之家",
+      category: "科技",
+      items: [{ rank: 1, title: "科技新闻", url: "https://example.com/one" }]
+    }]);
+  });
+
   it("keeps the primary board when a platform has duplicate boards", () => {
     const sources = parseRebangHtml(`
       <div class="col-12 col-md-6 col-xl-4" data-filter="娱乐" role="listitem">

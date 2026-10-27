@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { backfillRepoDescriptions, normalizeSearchResponse, parseCompactNumber, parseTrendingHtml } from "./github";
+import { backfillRepoDescriptions, fetchTrending, normalizeSearchResponse, parseCompactNumber, parseTrendingHtml } from "./github";
 
 describe("github helpers", () => {
   it("parses compact numbers", () => {
@@ -137,5 +137,28 @@ describe("github helpers", () => {
       source: "search",
       topics: ["openai", "examples"]
     });
+  });
+
+  it("rejects an empty trending page instead of erasing cached data", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve("<html></html>") })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ items: [] }) }));
+
+    await expect(fetchTrending("daily")).rejects.toThrow("已保留原有缓存");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the GitHub API when trending HTML is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve("<html></html>") })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ items: [{
+        full_name: "owner/repo", html_url: "https://github.com/owner/repo", description: "A repo",
+        stargazers_count: 1000, language: "TypeScript", topics: []
+      }] }) }));
+
+    await expect(fetchTrending("weekly")).resolves.toMatchObject([{ fullName: "owner/repo", source: "trending" }]);
+
+    vi.unstubAllGlobals();
   });
 });

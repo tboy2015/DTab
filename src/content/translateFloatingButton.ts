@@ -6,6 +6,7 @@ const TRANSLATION_STYLE_ID = "dtab-inline-translation-style";
 const STORAGE_KEY = "dtab.translateFloatingButton";
 const TRANSLATION_PREFERENCES_KEY = "dtab.translation.preferences";
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const GOOGLE_MOBILE_ENDPOINT = "https://translate.google.com/m";
 const MYMEMORY_ENDPOINT = "https://api.mymemory.translated.net/get";
 const TRANSLATE_REQUEST_TIMEOUT_MS = 10000;
 const RUNTIME_MESSAGE_TIMEOUT_MS = 12000;
@@ -211,6 +212,50 @@ async function translateWithGoogle(text: string): Promise<string> {
   return readTranslatedText(await fetchJsonWithTimeout(`${TRANSLATE_ENDPOINT}?${params.toString()}`));
 }
 
+function decodeHtmlEntities(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    quot: '"'
+  };
+
+  return value.replace(/&(#\d+|#x[\da-f]+|[a-z]+);/gi, (entity, key: string) => {
+    if (key[0] !== "#") {
+      return namedEntities[key.toLowerCase()] ?? entity;
+    }
+
+    const isHex = key[1]?.toLowerCase() === "x";
+    const codePoint = Number.parseInt(key.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+    return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : entity;
+  });
+}
+
+async function translateWithGoogleMobile(text: string): Promise<string> {
+  const params = new URLSearchParams({ sl: "auto", tl: preferences.targetLanguage, q: text });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), TRANSLATE_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${GOOGLE_MOBILE_ENDPOINT}?${params.toString()}`, {
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google 移动版翻译请求失败：${response.status}`);
+    }
+
+    const html = await response.text();
+    const match = html.match(/<div[^>]+class=["'][^"']*result-container[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+    return match ? decodeHtmlEntities(match[1].replace(/<[^>]+>/g, "")).trim() : "";
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function translateWithMyMemory(text: string): Promise<string> {
   const params = new URLSearchParams({
     q: text,
@@ -228,7 +273,17 @@ async function translateTextDirectly(text: string): Promise<string> {
       return translated;
     }
   } catch (error) {
-    console.warn("[translate] Google 翻译不可用，改用备用接口:", error);
+    console.warn("[translate] Google JSON 翻译不可用，改用移动版:", error);
+  }
+
+  try {
+    const translated = await translateWithGoogleMobile(text);
+
+    if (translated) {
+      return translated;
+    }
+  } catch (error) {
+    console.warn("[translate] Google 移动版翻译不可用，改用备用接口:", error);
   }
 
   return translateWithMyMemory(text);
